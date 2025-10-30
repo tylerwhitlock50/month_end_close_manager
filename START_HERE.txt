@@ -1,0 +1,128 @@
+╔══════════════════════════════════════════════════════════════════╗
+║                                                                  ║
+║           MONTH-END CLOSE MANAGER - START HERE                   ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
+
+📋 WHAT YOU HAVE
+────────────────────────────────────────────────────────────────────
+A complete month-end close management application with:
+  ✅ Task management with Kanban boards
+  ✅ File tracking and approvals
+  ✅ Dashboards and reporting
+  ✅ Email/Slack notifications
+  ✅ Full audit trail
+
+
+🚀 QUICKEST WAY TO START (5 MINUTES)
+────────────────────────────────────────────────────────────────────
+1. Install Docker Desktop for Windows (if not installed)
+   https://www.docker.com/products/docker-desktop/
+
+2. Open PowerShell in this directory
+
+3. Run the setup script:
+   .\setup.ps1
+
+4. Wait 2-3 minutes for setup to complete
+
+5. Open browser to: http://localhost:5173
+
+6. Login with:
+   Email: admin@monthend.com
+   Password: admin123
+
+
+📚 DOCUMENTATION FILES
+────────────────────────────────────────────────────────────────────
+QUICKSTART.md       ← Start here for detailed setup
+README.md           ← Complete documentation
+PROJECT_SUMMARY.md  ← What was built & how it works
+
+
+🔧 COMMON COMMANDS
+────────────────────────────────────────────────────────────────────
+Start application:
+  docker-compose up -d
+
+Stop application:
+  docker-compose down
+
+View logs:
+  docker-compose logs -f
+
+Restart:
+  docker-compose restart
+
+Reset database:
+  docker-compose exec backend python init_db.py --reset --seed
+
+
+🌐 ACCESS POINTS
+────────────────────────────────────────────────────────────────────
+Web App:      http://localhost:5173
+API:          http://localhost:8000
+API Docs:     http://localhost:8000/docs
+
+
+💡 FIRST STEPS AFTER LOGIN
+────────────────────────────────────────────────────────────────────
+1. Change default admin password (Settings → Security)
+2. Add team members (Users → Add User)
+3. Create your first period (Periods → New Period)
+4. Roll forward tasks from templates
+5. Start managing your close!
+
+
+📞 HELP
+────────────────────────────────────────────────────────────────────
+Issues? Check these files in order:
+  1. QUICKSTART.md (common problems & solutions)
+  2. README.md (detailed documentation)
+  3. Docker logs: docker-compose logs
+
+
+🎯 KEY FEATURES
+────────────────────────────────────────────────────────────────────
+✓ Task Management     - Kanban board & list views
+✓ Period Tracking     - Monthly, quarterly, year-end
+✓ File Management     - Upload or link external files
+✓ Approval Workflow   - Request & track approvals
+✓ Dashboard           - Real-time progress metrics
+✓ Reporting           - Export CSV/PDF reports
+✓ Notifications       - Email & Slack integration
+✓ Audit Trail         - Complete change history
+
+
+🔐 DEFAULT ACCOUNTS
+────────────────────────────────────────────────────────────────────
+Admin:
+  Email: admin@monthend.com
+  Password: admin123
+  Role: Full access
+
+Sample Users (all use password: password123):
+  john.doe@monthend.com (Preparer - Accounting)
+  jane.smith@monthend.com (Reviewer - Finance)
+  bob.wilson@monthend.com (Preparer - Operations)
+
+
+⚙️ OPTIONAL CONFIGURATION
+────────────────────────────────────────────────────────────────────
+Edit .env file to configure:
+  - Email notifications (SMTP settings)
+  - Slack integration (Bot token)
+  - File storage location
+  - Security settings
+
+After editing .env, restart: docker-compose restart
+
+
+🎉 THAT'S IT!
+────────────────────────────────────────────────────────────────────
+You're ready to start managing your month-end close process!
+
+For detailed help, see QUICKSTART.md or README.md
+
+Happy closing! 📊
+

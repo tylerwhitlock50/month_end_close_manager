@@ -1,0 +1,762 @@
+import csv
+import io
+import os
+import uuid
+from decimal import Decimal, InvalidOperation
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    UploadFile,
+    status,
+    File as FastAPIFile,
+    Form
+)
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session, selectinload
+
+from backend.auth import get_current_user
+from backend.config import settings
+from backend.database import get_db
+from backend.models import (
+    TrialBalance as TrialBalanceModel,
+    TrialBalanceAccount as TrialBalanceAccountModel,
+    TrialBalanceAttachment as TrialBalanceAttachmentModel,
+    TrialBalanceValidation as TrialBalanceValidationModel,
+    Period as PeriodModel,
+    Task as TaskModel,
+    User as UserModel
+)
+from backend.schemas import (
+    TrialBalance,
+    TrialBalanceSummary,
+    TrialBalanceAccount,
+    TrialBalanceAccountUpdate,
+    TrialBalanceAccountTasksUpdate,
+    TrialBalanceAttachment,
+    TrialBalanceAttachmentLink,
+    TrialBalanceValidation
+)
+from backend.services.trial_balance_linker import auto_link_tasks_to_trial_balance_accounts
+
+
+router = APIRouter(prefix="/api/trial-balance", tags=["trial-balance"])
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+TEMPLATE_PATH = BASE_DIR / "resources" / "trial_balance_template.csv"
+
+
+ACCOUNT_NUMBER_COLUMNS = [
+    "account number",
+    "account",
+    "number",
+    "acct",
+    "acct number"
+]
+ACCOUNT_NAME_COLUMNS = [
+    "account name",
+    "name",
+    "acct name"
+]
+ACCOUNT_TYPE_COLUMNS = [
+    "account type",
+    "type"
+]
+DEBIT_COLUMNS = [
+    "debit",
+    "debits"
+]
+CREDIT_COLUMNS = [
+    "credit",
+    "credits"
+]
+BALANCE_COLUMNS = [
+    "ending balance",
+    "balance",
+    "amount",
+    "net amount",
+    "ending amt"
+]
+
+
+def _find_column(fieldnames, candidates):
+    if not fieldnames:
+        return None
+
+    normalized = {name.lower().strip(): name for name in fieldnames}
+    for candidate in candidates:
+        key = candidate.lower().strip()
+        if key in normalized:
+            return normalized[key]
+
+    for name in fieldnames:
+        lowered = name.lower().strip()
+        for candidate in candidates:
+            if candidate.lower() in lowered:
+                return name
+
+    return None
+
+
+def _parse_decimal(raw_value: Optional[str]) -> Optional[Decimal]:
+    if raw_value is None:
+        return None
+
+    value = raw_value.strip()
+    if not value:
+        return None
+
+    value = value.replace(",", "")
+    if value.startswith("$"):
+        value = value[1:]
+    if value.startswith("(") and value.endswith(")"):
+        value = f"-{value[1:-1]}"
+
+    try:
+        return Decimal(value)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _store_import_file(trial_balance_id: int, original_filename: str, content: bytes) -> tuple[str, str]:
+    safe_name = original_filename or "trial_balance.csv"
+    extension = os.path.splitext(safe_name)[1]
+    stored_filename = f"{uuid.uuid4()}{extension}"
+
+    base_dir = os.path.join(settings.file_storage_path, "trial_balances", str(trial_balance_id))
+    os.makedirs(base_dir, exist_ok=True)
+
+    file_path = os.path.join(base_dir, stored_filename)
+    with open(file_path, "wb") as buffer:
+        buffer.write(content)
+
+    return stored_filename, file_path
+
+
+def _store_validation_file(trial_balance_id: int, account_id: int, original_filename: str, content: bytes) -> tuple[str, str, str]:
+    safe_name = original_filename or "validation_support"
+    extension = os.path.splitext(safe_name)[1]
+    stored_filename = f"{uuid.uuid4()}{extension}"
+
+    base_dir = os.path.join(
+        settings.file_storage_path,
+        "trial_balances",
+        str(trial_balance_id),
+        str(account_id),
+        "validations"
+    )
+    os.makedirs(base_dir, exist_ok=True)
+
+    file_path = os.path.join(base_dir, stored_filename)
+    with open(file_path, "wb") as buffer:
+        buffer.write(content)
+
+    relative_path = os.path.relpath(file_path, settings.file_storage_path)
+
+    return stored_filename, file_path, relative_path
+
+
+def _compute_validation_metrics(account: TrialBalanceAccountModel, supporting_amount: Decimal) -> tuple[Decimal, Decimal, bool]:
+    account_balance = account.ending_balance if account.ending_balance is not None else Decimal("0")
+    difference = supporting_amount - account_balance
+    matches = difference == Decimal("0")
+    return account_balance, difference, matches
+
+
+@router.get("/template")
+async def download_trial_balance_template(
+    current_user: UserModel = Depends(get_current_user)
+):
+    if not TEMPLATE_PATH.exists():
+        raise HTTPException(status_code=500, detail="Trial balance template is missing")
+
+    return FileResponse(
+        path=str(TEMPLATE_PATH),
+        media_type="text/csv",
+        filename="trial_balance_template.csv"
+    )
+
+
+@router.post("/{period_id}/import", response_model=TrialBalanceSummary, status_code=status.HTTP_201_CREATED)
+async def import_trial_balance(
+    period_id: int,
+    replace_existing: bool = False,
+    file: UploadFile = FastAPIFile(...),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    period = db.query(PeriodModel).filter(PeriodModel.id == period_id).first()
+    if not period:
+        raise HTTPException(status_code=404, detail="Period not found")
+
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    try:
+        decoded = raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        decoded = raw_bytes.decode("latin-1")
+
+    csv_stream = io.StringIO(decoded)
+    reader = csv.DictReader(csv_stream)
+
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV header row is missing")
+
+    account_number_col = _find_column(reader.fieldnames, ACCOUNT_NUMBER_COLUMNS)
+    account_name_col = _find_column(reader.fieldnames, ACCOUNT_NAME_COLUMNS)
+    debit_col = _find_column(reader.fieldnames, DEBIT_COLUMNS)
+    credit_col = _find_column(reader.fieldnames, CREDIT_COLUMNS)
+    balance_col = _find_column(reader.fieldnames, BALANCE_COLUMNS)
+    account_type_col = _find_column(reader.fieldnames, ACCOUNT_TYPE_COLUMNS)
+
+    if not account_number_col or not account_name_col:
+        raise HTTPException(status_code=400, detail="CSV must include account number and account name columns")
+
+    if not balance_col and not (debit_col or credit_col):
+        raise HTTPException(status_code=400, detail="CSV must include either an ending balance column or debit/credit columns")
+
+    accounts_to_create = []
+    total_debit: Optional[Decimal] = Decimal("0") if debit_col else None
+    total_credit: Optional[Decimal] = Decimal("0") if credit_col else None
+    total_balance: Optional[Decimal] = Decimal("0") if balance_col else Decimal("0")
+
+    for row in reader:
+        account_number = (row.get(account_number_col) or "").strip()
+        account_name = (row.get(account_name_col) or "").strip()
+
+        if not account_number and not account_name:
+            continue
+
+        debit_value = _parse_decimal(row.get(debit_col)) if debit_col else None
+        credit_value = _parse_decimal(row.get(credit_col)) if credit_col else None
+        balance_value = _parse_decimal(row.get(balance_col)) if balance_col else None
+
+        if balance_value is None and (debit_value is not None or credit_value is not None):
+            debit_component = debit_value or Decimal("0")
+            credit_component = credit_value or Decimal("0")
+            balance_value = debit_component - credit_component
+
+        account_entry = {
+            "account_number": account_number,
+            "account_name": account_name,
+            "account_type": (row.get(account_type_col) or "").strip() if account_type_col else None,
+            "debit": debit_value,
+            "credit": credit_value,
+            "ending_balance": balance_value
+        }
+        accounts_to_create.append(account_entry)
+
+        if debit_value is not None:
+            if total_debit is None:
+                total_debit = Decimal("0")
+            total_debit += debit_value
+        if credit_value is not None:
+            if total_credit is None:
+                total_credit = Decimal("0")
+            total_credit += credit_value
+        if balance_value is not None:
+            if total_balance is None:
+                total_balance = Decimal("0")
+            total_balance += balance_value
+
+    if not accounts_to_create:
+        raise HTTPException(status_code=400, detail="No account rows were detected in the CSV")
+
+    if replace_existing:
+        existing = db.query(TrialBalanceModel).filter(TrialBalanceModel.period_id == period_id).all()
+        for tb in existing:
+            db.delete(tb)
+        db.commit()
+
+    trial_balance = TrialBalanceModel(
+        period_id=period_id,
+        name=f"{period.name} Trial Balance",
+        source_filename=file.filename or "trial_balance.csv",
+        stored_filename="",
+        file_path="",
+        uploaded_by_id=current_user.id,
+        total_debit=total_debit,
+        total_credit=total_credit,
+        total_balance=total_balance
+    )
+    db.add(trial_balance)
+    db.flush()
+
+    stored_filename, file_path = _store_import_file(trial_balance.id, file.filename or "trial_balance.csv", raw_bytes)
+    trial_balance.stored_filename = stored_filename
+    trial_balance.file_path = file_path
+
+    created_accounts = []
+
+    for account in accounts_to_create:
+        account_model = TrialBalanceAccountModel(
+            trial_balance_id=trial_balance.id,
+            account_number=account["account_number"],
+            account_name=account["account_name"],
+            account_type=account["account_type"],
+            debit=account["debit"],
+            credit=account["credit"],
+            ending_balance=account["ending_balance"]
+        )
+        db.add(account_model)
+        created_accounts.append(account_model)
+
+    db.flush()
+
+    auto_link_tasks_to_trial_balance_accounts(
+        db,
+        period_id=period_id,
+        trial_balance_id=trial_balance.id,
+        accounts=created_accounts
+    )
+
+    db.commit()
+    db.refresh(trial_balance)
+
+    account_count = db.query(TrialBalanceAccountModel).filter(TrialBalanceAccountModel.trial_balance_id == trial_balance.id).count()
+
+    return TrialBalanceSummary(
+        trial_balance_id=trial_balance.id,
+        period_id=period_id,
+        account_count=account_count,
+        total_debit=float(trial_balance.total_debit) if trial_balance.total_debit is not None else None,
+        total_credit=float(trial_balance.total_credit) if trial_balance.total_credit is not None else None,
+        total_balance=float(trial_balance.total_balance) if trial_balance.total_balance is not None else None
+    )
+
+
+@router.get("/{period_id}", response_model=TrialBalance)
+async def get_trial_balance(
+    period_id: int,
+    trial_balance_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    query = db.query(TrialBalanceModel).options(
+        selectinload(TrialBalanceModel.accounts).selectinload(TrialBalanceAccountModel.attachments),
+        selectinload(TrialBalanceModel.accounts).selectinload(TrialBalanceAccountModel.tasks),
+        selectinload(TrialBalanceModel.accounts)
+        .selectinload(TrialBalanceAccountModel.validations)
+        .selectinload(TrialBalanceValidationModel.task)
+    ).filter(TrialBalanceModel.period_id == period_id)
+
+    if trial_balance_id:
+        query = query.filter(TrialBalanceModel.id == trial_balance_id)
+    else:
+        query = query.order_by(TrialBalanceModel.uploaded_at.desc())
+
+    trial_balance = query.first()
+    if not trial_balance:
+        raise HTTPException(status_code=404, detail="Trial balance not found for period")
+
+    return trial_balance
+
+
+@router.get("/accounts/{account_id}", response_model=TrialBalanceAccount)
+async def get_trial_balance_account(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    account = db.query(TrialBalanceAccountModel).options(
+        selectinload(TrialBalanceAccountModel.attachments),
+        selectinload(TrialBalanceAccountModel.tasks),
+        selectinload(TrialBalanceAccountModel.validations).selectinload(TrialBalanceValidationModel.task)
+    ).filter(TrialBalanceAccountModel.id == account_id).first()
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Trial balance account not found")
+
+    return account
+
+
+@router.patch("/accounts/{account_id}", response_model=TrialBalanceAccount)
+async def update_trial_balance_account(
+    account_id: int,
+    update: TrialBalanceAccountUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    account = db.query(TrialBalanceAccountModel).filter(TrialBalanceAccountModel.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Trial balance account not found")
+
+    if update.notes is not None:
+        account.notes = update.notes
+
+    if update.is_verified is not None:
+        account.is_verified = update.is_verified
+        if update.is_verified:
+            account.verified_at = datetime.utcnow()
+            account.verified_by_id = current_user.id
+        else:
+            account.verified_at = None
+            account.verified_by_id = None
+
+    db.commit()
+    db.refresh(account)
+
+    return account
+
+
+@router.put("/accounts/{account_id}/tasks", response_model=TrialBalanceAccount)
+async def update_account_tasks(
+    account_id: int,
+    payload: TrialBalanceAccountTasksUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    account = db.query(TrialBalanceAccountModel).options(selectinload(TrialBalanceAccountModel.trial_balance)).filter(TrialBalanceAccountModel.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Trial balance account not found")
+
+    if not payload.task_ids:
+        account.tasks = []
+    else:
+        tasks = db.query(TaskModel).filter(TaskModel.id.in_(payload.task_ids)).all()
+
+        if len(tasks) != len(set(payload.task_ids)):
+            raise HTTPException(status_code=400, detail="One or more tasks were not found")
+
+        period_id = account.trial_balance.period_id if account.trial_balance else None
+        invalid_tasks = [task.id for task in tasks if task.period_id != period_id]
+        if invalid_tasks:
+            raise HTTPException(status_code=400, detail=f"Tasks {invalid_tasks} are not part of the same period")
+
+        account.tasks = tasks
+
+    db.commit()
+    db.refresh(account)
+
+    return account
+
+
+@router.post("/accounts/{account_id}/validations", response_model=TrialBalanceValidation, status_code=status.HTTP_201_CREATED)
+async def create_validation(
+    account_id: int,
+    task_id: Optional[int] = Form(None),
+    supporting_amount: str = Form(...),
+    notes: Optional[str] = Form(None),
+    file: Optional[UploadFile] = FastAPIFile(None),
+    file_date: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    account = db.query(TrialBalanceAccountModel).options(selectinload(TrialBalanceAccountModel.trial_balance)).filter(TrialBalanceAccountModel.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Trial balance account not found")
+
+    try:
+        supporting_amount_decimal = Decimal(supporting_amount)
+    except (InvalidOperation, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid supporting amount")
+
+    linked_task = None
+    if task_id is not None:
+        linked_task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+        if not linked_task:
+            raise HTTPException(status_code=404, detail="Linked task not found")
+
+        period_id = account.trial_balance.period_id if account.trial_balance else None
+        if linked_task.period_id != period_id:
+            raise HTTPException(status_code=400, detail="Linked task must belong to the same period")
+
+    stored_filename = None
+    file_path = None
+    relative_path = None
+    file_size = None
+    mime_type = None
+    parsed_file_date = None
+
+    max_size_bytes = settings.max_file_size_mb * 1024 * 1024
+    if file is not None:
+        file.file.seek(0, 2)
+        size = file.file.tell()
+        file.file.seek(0)
+        if size > max_size_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File size exceeds maximum allowed size of {settings.max_file_size_mb}MB"
+            )
+
+        file_bytes = await file.read()
+        stored_filename, file_path, relative_path = _store_validation_file(
+            account.trial_balance_id,
+            account.id,
+            file.filename or "support",
+            file_bytes
+        )
+        file_size = len(file_bytes)
+        mime_type = file.content_type
+
+    if file_date:
+        try:
+            parsed_file_date = datetime.fromisoformat(file_date).date()
+        except ValueError:
+            parsed_file_date = None
+
+    _, difference, matches = _compute_validation_metrics(account, supporting_amount_decimal)
+
+    validation = TrialBalanceValidationModel(
+        account_id=account.id,
+        task_id=task_id,
+        supporting_amount=supporting_amount_decimal,
+        difference=difference,
+        matches_balance=matches,
+        notes=notes,
+        evidence_filename=stored_filename,
+        evidence_original_filename=file.filename if file else None,
+        evidence_path=file_path,
+        evidence_relative_path=relative_path,
+        evidence_size=file_size,
+        evidence_mime_type=mime_type,
+        evidence_file_date=parsed_file_date
+    )
+    db.add(validation)
+    db.commit()
+    db.refresh(validation)
+
+    return validation
+
+
+@router.patch("/validations/{validation_id}", response_model=TrialBalanceValidation)
+async def update_validation(
+    validation_id: int,
+    supporting_amount: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    task_id: Optional[int] = Form(None),
+    file: Optional[UploadFile] = FastAPIFile(None),
+    file_date: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    validation = db.query(TrialBalanceValidationModel).options(selectinload(TrialBalanceValidationModel.account).selectinload(TrialBalanceAccountModel.trial_balance)).filter(TrialBalanceValidationModel.id == validation_id).first()
+    if not validation:
+        raise HTTPException(status_code=404, detail="Validation not found")
+
+    if supporting_amount is not None:
+        try:
+            supporting_amount_decimal = Decimal(supporting_amount)
+        except (InvalidOperation, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid supporting amount")
+        validation.supporting_amount = supporting_amount_decimal
+        _, difference, matches = _compute_validation_metrics(validation.account, supporting_amount_decimal)
+        validation.difference = difference
+        validation.matches_balance = matches
+
+    if notes is not None:
+        validation.notes = notes
+
+    if task_id is not None:
+        if task_id == 0:
+            validation.task_id = None
+        else:
+            linked_task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+            if not linked_task:
+                raise HTTPException(status_code=404, detail="Linked task not found")
+            period_id = validation.account.trial_balance.period_id if validation.account and validation.account.trial_balance else None
+            if linked_task.period_id != period_id:
+                raise HTTPException(status_code=400, detail="Linked task must belong to the same period")
+            validation.task_id = task_id
+
+    if file_date is not None:
+        try:
+            validation.evidence_file_date = datetime.fromisoformat(file_date).date()
+        except ValueError:
+            validation.evidence_file_date = None
+
+    if file is not None:
+        max_size_bytes = settings.max_file_size_mb * 1024 * 1024
+        file.file.seek(0, 2)
+        size = file.file.tell()
+        file.file.seek(0)
+        if size > max_size_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File size exceeds maximum allowed size of {settings.max_file_size_mb}MB"
+            )
+
+        file_bytes = await file.read()
+
+        if validation.evidence_path and os.path.exists(validation.evidence_path):
+            try:
+                os.remove(validation.evidence_path)
+            except OSError:
+                pass
+
+        stored_filename, file_path, relative_path = _store_validation_file(
+            validation.account.trial_balance_id,
+            validation.account_id,
+            file.filename or "support",
+            file_bytes
+        )
+        validation.evidence_filename = stored_filename
+        validation.evidence_original_filename = file.filename
+        validation.evidence_path = file_path
+        validation.evidence_relative_path = relative_path
+        validation.evidence_size = len(file_bytes)
+        validation.evidence_mime_type = file.content_type
+        validation.evidence_uploaded_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(validation)
+
+    return validation
+
+
+@router.delete("/validations/{validation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_validation(
+    validation_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    validation = db.query(TrialBalanceValidationModel).filter(TrialBalanceValidationModel.id == validation_id).first()
+    if not validation:
+        raise HTTPException(status_code=404, detail="Validation not found")
+
+    if validation.evidence_path and os.path.exists(validation.evidence_path):
+        try:
+            os.remove(validation.evidence_path)
+        except OSError:
+            pass
+
+    db.delete(validation)
+    db.commit()
+
+
+@router.post("/accounts/{account_id}/attachments/upload", response_model=TrialBalanceAttachment, status_code=status.HTTP_201_CREATED)
+async def upload_account_attachment(
+    account_id: int,
+    file: UploadFile = FastAPIFile(...),
+    description: Optional[str] = Form(None),
+    file_date: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    account = db.query(TrialBalanceAccountModel).filter(TrialBalanceAccountModel.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Trial balance account not found")
+
+    max_size_bytes = settings.max_file_size_mb * 1024 * 1024
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+
+    if file_size > max_size_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File size exceeds maximum allowed size of {settings.max_file_size_mb}MB"
+        )
+
+    raw_bytes = await file.read()
+    extension = os.path.splitext(file.filename or "")[1]
+    stored_name = f"{uuid.uuid4()}{extension}"
+    base_dir = os.path.join(settings.file_storage_path, "trial_balances", str(account.trial_balance_id), str(account.id))
+    os.makedirs(base_dir, exist_ok=True)
+    file_path = os.path.join(base_dir, stored_name)
+
+    with open(file_path, "wb") as buffer:
+        buffer.write(raw_bytes)
+
+    parsed_file_date = None
+    if file_date:
+        try:
+            parsed_file_date = datetime.fromisoformat(file_date).date()
+        except ValueError:
+            parsed_file_date = None
+
+    attachment = TrialBalanceAttachmentModel(
+        account_id=account.id,
+        filename=stored_name,
+        original_filename=file.filename or stored_name,
+        file_path=file_path,
+        file_size=file_size,
+        mime_type=file.content_type,
+        description=description,
+        file_date=parsed_file_date,
+        uploaded_by_id=current_user.id,
+        is_external_link=False
+    )
+
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+
+    return attachment
+
+
+@router.post("/accounts/{account_id}/attachments/link", response_model=TrialBalanceAttachment, status_code=status.HTTP_201_CREATED)
+async def link_account_attachment(
+    account_id: int,
+    payload: TrialBalanceAttachmentLink,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    account = db.query(TrialBalanceAccountModel).filter(TrialBalanceAccountModel.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Trial balance account not found")
+
+    attachment = TrialBalanceAttachmentModel(
+        account_id=account.id,
+        filename=payload.external_url.split("/")[-1] or "External Link",
+        original_filename=payload.external_url.split("/")[-1] or "External Link",
+        file_path="",
+        file_size=0,
+        mime_type=None,
+        description=payload.description,
+        file_date=payload.file_date,
+        uploaded_by_id=current_user.id,
+        is_external_link=True,
+        external_url=payload.external_url
+    )
+
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+
+    return attachment
+
+
+@router.delete("/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account_attachment(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    attachment = db.query(TrialBalanceAttachmentModel).filter(TrialBalanceAttachmentModel.id == attachment_id).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    if not attachment.is_external_link and attachment.file_path:
+        try:
+            if os.path.exists(attachment.file_path):
+                os.remove(attachment.file_path)
+        except OSError:
+            pass
+
+    db.delete(attachment)
+    db.commit()
+
+
+@router.get("/attachments/{attachment_id}", response_model=TrialBalanceAttachment)
+async def get_account_attachment(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    attachment = db.query(TrialBalanceAttachmentModel).filter(TrialBalanceAttachmentModel.id == attachment_id).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    attachment.last_accessed_at = datetime.utcnow()
+    db.commit()
+    db.refresh(attachment)
+
+    return attachment
