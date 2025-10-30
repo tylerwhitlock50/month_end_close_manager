@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field, validator
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from decimal import Decimal
 from datetime import datetime, date
 from backend.models import UserRole, TaskStatus, PeriodStatus, ApprovalStatus, CloseType
@@ -299,6 +299,25 @@ class AuditLogWithUser(AuditLog):
     user: User
 
 
+class TaskActivityEvent(BaseModel):
+    id: str
+    event_type: str
+    message: str
+    created_at: datetime
+    user: User
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class TaskBulkUpdateRequest(BaseModel):
+    task_ids: List[int]
+    status: Optional[TaskStatus] = None
+    assignee_id: Optional[int] = None
+
+
+class TaskBulkUpdateResult(BaseModel):
+    updated: int
+
+
 # Notification Schemas
 class Notification(BaseModel):
     id: int
@@ -309,7 +328,8 @@ class Notification(BaseModel):
     is_read: bool
     link_url: Optional[str] = None
     created_at: datetime
-    
+    read_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 
@@ -338,6 +358,9 @@ class DashboardStats(BaseModel):
     tasks_due_today: int
     completion_percentage: float
     avg_time_to_complete: Optional[float] = None
+    blocked_tasks: List[TaskSummary] = []
+    review_tasks: List[TaskSummary] = []
+    at_risk_tasks: List[TaskSummary] = []
 
 
 class PeriodProgress(BaseModel):
@@ -345,6 +368,26 @@ class PeriodProgress(BaseModel):
     stats: DashboardStats
     tasks_by_status: dict
     tasks_by_department: dict
+
+
+class DepartmentSummary(BaseModel):
+    department: Optional[str]
+    total_tasks: int
+    completed_tasks: int
+
+
+class PeriodDetail(BaseModel):
+    period: Period
+    completion_percentage: float
+    total_tasks: int
+    status_counts: Dict[str, int]
+    tasks_by_status: Dict[str, List[TaskSummary]]
+    overdue_tasks: List[TaskSummary]
+    upcoming_tasks: List[TaskSummary]
+    department_breakdown: List[DepartmentSummary]
+    period_files_count: int
+    task_files_count: int
+    trial_balance_files_count: int
 
 
 # Reporting Schemas

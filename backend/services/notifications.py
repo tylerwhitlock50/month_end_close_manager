@@ -1,12 +1,13 @@
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import List
+from typing import List, Optional
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from sqlalchemy.orm import Session
 
 from backend.config import settings
-from backend.models import User
+from backend.models import User, Notification as NotificationModel
 
 
 class EmailService:
@@ -238,6 +239,34 @@ class SlackService:
         ]
         
         self.send_message(settings.slack_channel, text, blocks)
+
+
+class NotificationService:
+    """Helpers for persisting and dispatching in-app notifications."""
+
+    @staticmethod
+    def create_notification(
+        db: Session,
+        *,
+        user_id: int,
+        title: str,
+        message: str,
+        notification_type: str,
+        link_url: Optional[str] = None,
+        commit: bool = False
+    ) -> NotificationModel:
+        notification = NotificationModel(
+            user_id=user_id,
+            title=title,
+            message=message,
+            notification_type=notification_type,
+            link_url=link_url,
+        )
+        db.add(notification)
+        if commit:
+            db.commit()
+            db.refresh(notification)
+        return notification
 
 
 # Service instances

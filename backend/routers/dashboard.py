@@ -12,7 +12,7 @@ from backend.models import (
     TaskStatus,
     PeriodStatus
 )
-from backend.schemas import DashboardStats
+from backend.schemas import DashboardStats, TaskSummary
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -76,6 +76,23 @@ async def get_dashboard_stats(
         )
         avg_time_to_complete = total_hours / len(completed_with_times)
     
+    def to_summary(task: TaskModel) -> TaskSummary:
+        return TaskSummary(id=task.id, name=task.name, status=task.status, due_date=task.due_date)
+
+    blocked_tasks = [to_summary(t) for t in tasks if t.status == TaskStatus.BLOCKED]
+    review_tasks = [to_summary(t) for t in tasks if t.status == TaskStatus.REVIEW]
+
+    at_risk_deadline = datetime.utcnow() + timedelta(days=2)
+    at_risk_tasks = [
+        to_summary(t)
+        for t in tasks
+        if t.status != TaskStatus.COMPLETE and t.due_date and t.due_date <= at_risk_deadline
+    ]
+
+    blocked_tasks.sort(key=lambda item: item.due_date or datetime.max)
+    review_tasks.sort(key=lambda item: item.due_date or datetime.max)
+    at_risk_tasks.sort(key=lambda item: item.due_date or datetime.max)
+
     return DashboardStats(
         total_tasks=total_tasks,
         completed_tasks=completed_tasks,
@@ -83,6 +100,9 @@ async def get_dashboard_stats(
         overdue_tasks=overdue_tasks,
         tasks_due_today=tasks_due_today,
         completion_percentage=round(completion_percentage, 2),
-        avg_time_to_complete=round(avg_time_to_complete, 2) if avg_time_to_complete else None
+        avg_time_to_complete=round(avg_time_to_complete, 2) if avg_time_to_complete else None,
+        blocked_tasks=blocked_tasks[:5],
+        review_tasks=review_tasks[:5],
+        at_risk_tasks=at_risk_tasks[:5]
     )
 

@@ -1,4 +1,4 @@
-import { ReactNode } from 'react'
+import { ReactNode, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -14,7 +14,10 @@ import {
   FolderOpen
 } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
-import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import api from '../lib/api'
+import { usePeriodStore } from '../stores/periodStore'
+import NotificationsBell from './NotificationsBell'
 
 interface LayoutProps {
   children: ReactNode
@@ -24,6 +27,53 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation()
   const { user, logout } = useAuthStore()
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const { selectedPeriodId, selectedPeriodName, setPeriod } = usePeriodStore()
+
+  const { data: periods } = useQuery({
+    queryKey: ['periods'],
+    queryFn: async () => {
+      const response = await api.get('/api/periods/', {
+        params: { include_inactive: true },
+      })
+      return response.data as Array<{
+        id: number
+        name: string
+        is_active: boolean
+      }>
+    },
+  })
+
+  const currentSelection = useMemo(() => {
+    if (!periods || periods.length === 0) {
+      return { id: selectedPeriodId, name: selectedPeriodName }
+    }
+
+    const match = periods.find((period) => period.id === selectedPeriodId)
+    if (match) {
+      return { id: match.id, name: match.name }
+    }
+
+    return { id: null, name: selectedPeriodName }
+  }, [periods, selectedPeriodId, selectedPeriodName])
+
+  useEffect(() => {
+    if (!periods || periods.length === 0) {
+      return
+    }
+
+    if (selectedPeriodId) {
+      const exists = periods.some((period) => period.id === selectedPeriodId)
+      if (!exists) {
+        setPeriod(null, null)
+      }
+      return
+    }
+
+    const firstActive = periods.find((period) => period.is_active)
+    if (firstActive) {
+      setPeriod(firstActive.id, firstActive.name)
+    }
+  }, [periods, selectedPeriodId, setPeriod])
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -105,12 +155,42 @@ export default function Layout({ children }: LayoutProps) {
       <div className={`transition-margin duration-200 ${sidebarOpen ? 'lg:ml-64' : ''}`}>
         {/* Top bar */}
         <div className="sticky top-0 z-40 flex items-center h-16 px-6 bg-white border-b border-gray-200">
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-2 rounded-lg hover:bg-gray-100"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
+          <div className="flex items-center justify-between gap-4 w-full">
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-2 rounded-lg hover:bg-gray-100"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 ml-auto">
+              <NotificationsBell />
+              <span className="hidden sm:inline text-sm text-gray-500">Working period</span>
+              <select
+                className="input text-sm w-48"
+                value={currentSelection.id ?? ''}
+                onChange={(event) => {
+                  const value = event.target.value
+                  if (!value) {
+                    setPeriod(null, null)
+                    return
+                  }
+
+                  const periodId = Number(value)
+                  const match = periods?.find((period) => period.id === periodId)
+                  setPeriod(periodId, match?.name ?? null)
+                }}
+              >
+                <option value="">All active periods</option>
+                {periods?.map((period) => (
+                  <option key={period.id} value={period.id}>
+                    {period.name}
+                    {!period.is_active ? ' (inactive)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
 
         {/* Page content */}

@@ -16,7 +16,8 @@ from backend.routers import (
     dashboard,
     reports,
     trial_balance,
-    task_templates
+    task_templates,
+    notifications
 )
 
 # Create database tables
@@ -50,6 +51,7 @@ app.include_router(dashboard.router)
 app.include_router(reports.router)
 app.include_router(trial_balance.router)
 app.include_router(task_templates.router)
+app.include_router(notifications.router)
 
 # Mount static files
 if os.path.exists(settings.file_storage_path):

@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Calendar, Plus, ToggleLeft, ToggleRight, CheckCircle } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
 import { formatDate } from '../lib/utils'
 import PeriodModal from '../components/PeriodModal'
 
 export default function Periods() {
+  const navigate = useNavigate()
   const [showModal, setShowModal] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
 
@@ -133,7 +135,10 @@ export default function Periods() {
                 >
                   {period.is_active ? 'Deactivate period' : 'Activate period'}
                 </button>
-                <button className="w-full btn-secondary text-sm" disabled>
+                <button
+                  className="w-full btn-secondary text-sm"
+                  onClick={() => navigate(`/periods/${period.id}`)}
+                >
                   View Details
                 </button>
               </div>
@@ -181,4 +186,3 @@ function getStatusLabel(status: string): string {
   }
   return labels[status] || status
 }
-

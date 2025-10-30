@@ -3,7 +3,8 @@ from datetime import datetime, timedelta, timezone, date
 import calendar
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, selectinload
 
 from backend.database import get_db
 from backend.auth import get_current_user
@@ -15,11 +16,22 @@ from backend.models import (
     AuditLog as AuditLogModel,
     File as FileModel,
     Approval as ApprovalModel,
+    Comment as CommentModel,
     TaskStatus,
     task_dependencies
 )
-from backend.schemas import Task, TaskCreate, TaskUpdate, TaskWithRelations
+from backend.schemas import (
+    Task,
+    TaskCreate,
+    TaskUpdate,
+    TaskWithRelations,
+    TaskBulkUpdateRequest,
+    TaskBulkUpdateResult,
+    AuditLogWithUser,
+    TaskActivityEvent
+)
 from backend.services.trial_balance_linker import auto_link_tasks_to_trial_balance_accounts
+from backend.services.notifications import NotificationService
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -58,6 +70,7 @@ async def get_tasks(
     owner_id: Optional[int] = None,
     assignee_id: Optional[int] = None,
     department: Optional[str] = None,
+    mine: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
@@ -76,6 +89,13 @@ async def get_tasks(
         query = query.filter(TaskModel.assignee_id == assignee_id)
     if department:
         query = query.filter(TaskModel.department == department)
+    if mine:
+        query = query.filter(
+            or_(
+                TaskModel.owner_id == current_user.id,
+                TaskModel.assignee_id == current_user.id
+            )
+        )
     
     tasks = query.order_by(TaskModel.due_date.asc()).offset(skip).limit(limit).all()
     
@@ -149,6 +169,68 @@ async def get_my_tasks(
     return result
 
 
+@router.get("/review-queue", response_model=List[TaskWithRelations])
+async def get_review_queue(
+    skip: int = 0,
+    limit: int = 100,
+    period_id: Optional[int] = None,
+    department: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Tasks awaiting review for the current user."""
+    query = (
+        db.query(TaskModel)
+        .join(PeriodModel)
+        .filter(TaskModel.status == TaskStatus.REVIEW)
+        .filter(
+            or_(
+                TaskModel.owner_id == current_user.id,
+                TaskModel.assignee_id == current_user.id
+            )
+        )
+    )
+
+    if period_id:
+        query = query.filter(TaskModel.period_id == period_id)
+    else:
+        query = query.filter(PeriodModel.is_active == True)
+
+    if department:
+        query = query.filter(TaskModel.department == department)
+
+    tasks = (
+        query
+        .order_by(TaskModel.due_date.asc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+    result = []
+    for task in tasks:
+        file_count = db.query(FileModel).filter(FileModel.task_id == task.id).count()
+        pending_approvals = db.query(ApprovalModel).filter(
+            ApprovalModel.task_id == task.id,
+            ApprovalModel.status == "pending"
+        ).count()
+
+        dependency_ids = [dep.id for dep in task.dependencies]
+
+        task_dict = {
+            **task.__dict__,
+            "owner": task.owner,
+            "assignee": task.assignee,
+            "period": task.period,
+            "file_count": file_count,
+            "pending_approvals": pending_approvals,
+            "dependencies": dependency_ids
+        }
+        result.append(task_dict)
+
+    return result
+
+
 @router.get("/{task_id}", response_model=TaskWithRelations)
 async def get_task(
     task_id: int,
@@ -177,6 +259,120 @@ async def get_task(
         "pending_approvals": pending_approvals,
         "dependencies": dependency_ids
     }
+
+
+@router.get("/{task_id}/audit-logs", response_model=List[AuditLogWithUser])
+async def get_task_audit_logs(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    logs = (
+        db.query(AuditLogModel)
+        .options(selectinload(AuditLogModel.user))
+        .filter(AuditLogModel.task_id == task_id)
+        .order_by(AuditLogModel.created_at.desc())
+        .all()
+    )
+
+    return logs
+
+
+@router.get("/{task_id}/activity", response_model=List[TaskActivityEvent])
+async def get_task_activity(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    comments = (
+        db.query(CommentModel)
+        .options(selectinload(CommentModel.user))
+        .filter(CommentModel.task_id == task_id)
+        .all()
+    )
+
+    audit_logs = (
+        db.query(AuditLogModel)
+        .options(selectinload(AuditLogModel.user))
+        .filter(AuditLogModel.task_id == task_id)
+        .order_by(AuditLogModel.created_at.desc())
+        .all()
+    )
+
+    def format_status_label(raw: Optional[str]) -> Optional[str]:
+        if not raw:
+            return None
+        value = raw
+        if raw.startswith("TaskStatus."):
+            value = raw.split(".", 1)[1]
+        normalized = value.lower()
+        mapping = {
+            "not_started": "Not Started",
+            "in_progress": "In Progress",
+            "review": "Ready for Review",
+            "complete": "Complete",
+            "blocked": "Blocked",
+        }
+        return mapping.get(normalized, value.replace("_", " ").title())
+
+    def format_log_message(log: AuditLogModel) -> str:
+        if log.action == "status_changed":
+            old_label = format_status_label(log.old_value)
+            new_label = format_status_label(log.new_value)
+            if old_label and new_label:
+                return f"Status changed from {old_label} to {new_label}"
+            return "Status updated"
+        if log.action == "file_uploaded":
+            return log.details or "File uploaded"
+        if log.action == "file_deleted":
+            return log.details or "File removed"
+        if log.action == "created":
+            return "Task created"
+        if log.details:
+            return log.details
+        return log.action.replace("_", " ").title()
+
+    events: List[TaskActivityEvent] = []
+
+    for comment in comments:
+        events.append(
+            TaskActivityEvent(
+                id=f"comment-{comment.id}",
+                event_type="comment",
+                message=comment.content,
+                created_at=comment.created_at,
+                user=comment.user,
+                metadata={"is_internal": comment.is_internal}
+            )
+        )
+
+    for log in audit_logs:
+        events.append(
+            TaskActivityEvent(
+                id=f"audit-{log.id}",
+                event_type="activity",
+                message=format_log_message(log),
+                created_at=log.created_at,
+                user=log.user,
+                metadata={
+                    "action": log.action,
+                    "entity_type": log.entity_type,
+                    "entity_id": log.entity_id,
+                }
+            )
+        )
+
+    events.sort(key=lambda event: event.created_at, reverse=True)
+
+    return events
 
 
 @router.post("/", response_model=Task, status_code=status.HTTP_201_CREATED)
@@ -221,12 +417,96 @@ async def create_task(
 
     db.commit()
     db.refresh(db_task)
-    
+
+    if db_task.assignee_id and db_task.assignee_id != current_user.id:
+        NotificationService.create_notification(
+            db,
+            user_id=db_task.assignee_id,
+            title="New task assigned",
+            message=f"You have been assigned '{db_task.name}'.",
+            notification_type="task_assigned",
+            link_url=f"/tasks?mine=1&highlight={db_task.id}",
+        )
+
     # Log creation
     log_task_change(db, db_task, current_user, "created")
     db.commit()
-    
+
     return db_task
+
+
+@router.post("/bulk-update", response_model=TaskBulkUpdateResult)
+async def bulk_update_tasks(
+    payload: TaskBulkUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    if not payload.task_ids:
+        raise HTTPException(status_code=400, detail="Provide one or more task ids")
+
+    if payload.status is None and payload.assignee_id is None:
+        raise HTTPException(status_code=400, detail="No updates were specified")
+
+    assignee = None
+    if payload.assignee_id is not None:
+        assignee = db.query(UserModel).filter(UserModel.id == payload.assignee_id).first()
+        if not assignee:
+            raise HTTPException(status_code=404, detail="Assignee not found")
+
+    tasks = db.query(TaskModel).filter(TaskModel.id.in_(payload.task_ids)).all()
+    if not tasks:
+        return TaskBulkUpdateResult(updated=0)
+
+    updated_count = 0
+    now = datetime.utcnow()
+
+    for task in tasks:
+        changes_made = False
+
+        if payload.status is not None and task.status != payload.status:
+            old_status = task.status
+            task.status = payload.status
+            changes_made = True
+
+            if payload.status == TaskStatus.IN_PROGRESS and not task.started_at:
+                task.started_at = now
+            if payload.status == TaskStatus.COMPLETE and not task.completed_at:
+                task.completed_at = now
+
+            log_task_change(db, task, current_user, "status_changed", str(old_status), str(payload.status))
+
+            if payload.status == TaskStatus.REVIEW and task.owner_id and task.owner_id != current_user.id:
+                NotificationService.create_notification(
+                    db,
+                    user_id=task.owner_id,
+                    title="Task ready for review",
+                    message=f"{task.name} is ready for your review.",
+                    notification_type="task_review",
+                    link_url=f"/tasks?review=1&highlight={task.id}",
+                )
+
+        if payload.assignee_id is not None and task.assignee_id != payload.assignee_id:
+            old_value = str(task.assignee_id) if task.assignee_id else None
+            task.assignee_id = payload.assignee_id
+            changes_made = True
+            log_task_change(db, task, current_user, "assignee_changed", old_value, str(payload.assignee_id))
+
+            if task.assignee_id and task.assignee_id != current_user.id:
+                NotificationService.create_notification(
+                    db,
+                    user_id=task.assignee_id,
+                    title="Task assigned",
+                    message=f"You have been assigned '{task.name}'.",
+                    notification_type="task_assigned",
+                    link_url=f"/tasks?mine=1&highlight={task.id}",
+                )
+
+        if changes_made:
+            updated_count += 1
+
+    db.commit()
+
+    return TaskBulkUpdateResult(updated=updated_count)
 
 
 @router.put("/{task_id}", response_model=Task)
@@ -242,6 +522,7 @@ async def update_task(
         raise HTTPException(status_code=404, detail="Task not found")
     
     update_data = task_update.dict(exclude_unset=True, exclude={"dependency_ids"})
+    previous_assignee = task.assignee_id
     
     # Track status changes
     old_status = task.status
@@ -259,6 +540,16 @@ async def update_task(
                 task.started_at = datetime.utcnow()
             elif value == TaskStatus.COMPLETE and not task.completed_at:
                 task.completed_at = datetime.utcnow()
+
+            if value == TaskStatus.REVIEW and task.owner_id and task.owner_id != current_user.id:
+                NotificationService.create_notification(
+                    db,
+                    user_id=task.owner_id,
+                    title="Task ready for review",
+                    message=f"{task.name} is ready for your review.",
+                    notification_type="task_review",
+                    link_url=f"/tasks?review=1&highlight={task.id}",
+                )
     
     # Update dependencies if provided
     if task_update.dependency_ids is not None:
@@ -270,10 +561,25 @@ async def update_task(
             dep_task = db.query(TaskModel).filter(TaskModel.id == dep_id).first()
             if dep_task:
                 task.dependencies.append(dep_task)
-    
+
+    if (
+        task_update.assignee_id is not None
+        and task.assignee_id is not None
+        and task.assignee_id != previous_assignee
+        and task.assignee_id != current_user.id
+    ):
+        NotificationService.create_notification(
+            db,
+            user_id=task.assignee_id,
+            title="Task assigned",
+            message=f"You have been assigned '{task.name}'.",
+            notification_type="task_assigned",
+            link_url=f"/tasks?mine=1&highlight={task.id}",
+        )
+
     db.commit()
     db.refresh(task)
-    
+
     return task
 
 

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 from datetime import datetime, timedelta, timezone, date
 import calendar
 
@@ -14,9 +14,22 @@ from backend.models import (
     TaskTemplate as TaskTemplateModel,
     User as UserModel,
     UserRole,
-    TaskStatus
+    TaskStatus,
+    File as FileModel,
+    TrialBalance as TrialBalanceModel,
+    TrialBalanceAccount as TrialBalanceAccountModel,
+    TrialBalanceAttachment as TrialBalanceAttachmentModel,
 )
-from backend.schemas import Period, PeriodCreate, PeriodUpdate, PeriodProgress, DashboardStats
+from backend.schemas import (
+    Period,
+    PeriodCreate,
+    PeriodUpdate,
+    PeriodProgress,
+    DashboardStats,
+    PeriodDetail,
+    TaskSummary,
+    DepartmentSummary,
+)
 
 router = APIRouter(prefix="/api/periods", tags=["periods"])
 
@@ -117,6 +130,98 @@ async def get_period_progress(
         "tasks_by_status": tasks_by_status,
         "tasks_by_department": tasks_by_department
     }
+
+
+@router.get("/{period_id}/detail", response_model=PeriodDetail)
+async def get_period_detail(
+    period_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    period = db.query(PeriodModel).filter(PeriodModel.id == period_id).first()
+    if not period:
+        raise HTTPException(status_code=404, detail="Period not found")
+
+    tasks = db.query(TaskModel).filter(TaskModel.period_id == period_id).all()
+
+    total_tasks = len(tasks)
+    completed_tasks = sum(1 for task in tasks if task.status == TaskStatus.COMPLETE)
+    completion_percentage = (completed_tasks / total_tasks * 100) if total_tasks else 0.0
+
+    status_counts: Dict[str, int] = {}
+    tasks_by_status: Dict[str, List[TaskSummary]] = {}
+    department_totals: Dict[str, Dict[str, int]] = {}
+
+    for task in tasks:
+        status_key = task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
+        status_counts[status_key] = status_counts.get(status_key, 0) + 1
+        tasks_by_status.setdefault(status_key, []).append(
+            TaskSummary(id=task.id, name=task.name, status=task.status, due_date=task.due_date)
+        )
+
+        department_key = task.department or 'Unassigned'
+        if department_key not in department_totals:
+            department_totals[department_key] = {"total": 0, "completed": 0}
+        department_totals[department_key]["total"] += 1
+        if task.status == TaskStatus.COMPLETE:
+            department_totals[department_key]["completed"] += 1
+
+    now = datetime.utcnow()
+    upcoming_cutoff = now + timedelta(days=3)
+
+    overdue_tasks = [
+        TaskSummary(id=task.id, name=task.name, status=task.status, due_date=task.due_date)
+        for task in tasks
+        if task.status != TaskStatus.COMPLETE and task.due_date and task.due_date < now
+    ]
+    upcoming_tasks = [
+        TaskSummary(id=task.id, name=task.name, status=task.status, due_date=task.due_date)
+        for task in tasks
+        if task.status != TaskStatus.COMPLETE and task.due_date and now <= task.due_date <= upcoming_cutoff
+    ]
+
+    department_breakdown = [
+        DepartmentSummary(
+            department=department if department != 'Unassigned' else None,
+            total_tasks=counts["total"],
+            completed_tasks=counts["completed"],
+        )
+        for department, counts in department_totals.items()
+    ]
+
+    period_files_count = (
+        db.query(FileModel)
+        .filter(FileModel.period_id == period_id, FileModel.task_id.is_(None))
+        .count()
+    )
+
+    task_files_count = (
+        db.query(FileModel)
+        .filter(FileModel.period_id == period_id, FileModel.task_id.isnot(None))
+        .count()
+    )
+
+    trial_balance_files_count = (
+        db.query(TrialBalanceAttachmentModel)
+        .join(TrialBalanceAccountModel, TrialBalanceAttachmentModel.account_id == TrialBalanceAccountModel.id)
+        .join(TrialBalanceModel, TrialBalanceAccountModel.trial_balance_id == TrialBalanceModel.id)
+        .filter(TrialBalanceModel.period_id == period_id)
+        .count()
+    )
+
+    return PeriodDetail(
+        period=period,
+        completion_percentage=round(completion_percentage, 2),
+        total_tasks=total_tasks,
+        status_counts=status_counts,
+        tasks_by_status=tasks_by_status,
+        overdue_tasks=overdue_tasks,
+        upcoming_tasks=upcoming_tasks,
+        department_breakdown=department_breakdown,
+        period_files_count=period_files_count,
+        task_files_count=task_files_count,
+        trial_balance_files_count=trial_balance_files_count,
+    )
 
 
 @router.post("/", response_model=Period, status_code=status.HTTP_201_CREATED)

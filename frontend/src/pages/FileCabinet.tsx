@@ -14,9 +14,11 @@ import {
   FileText,
   FileSpreadsheet,
   Image as ImageIcon,
+  Eye,
 } from 'lucide-react'
 import api, { fetchPeriodFiles, downloadPeriodZip, deleteFile } from '../lib/api'
 import FileUploadModal from '../components/FileUploadModal'
+import FilePreviewModal from '../components/FilePreviewModal'
 
 interface Period {
   id: number
@@ -74,6 +76,7 @@ interface FileCabinetData {
 }
 
 export default function FileCabinet() {
+  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
   const [periods, setPeriods] = useState<Period[]>([])
   const [selectedPeriod, setSelectedPeriod] = useState<number | null>(null)
   const [cabinetData, setCabinetData] = useState<FileCabinetData | null>(null)
@@ -83,6 +86,14 @@ export default function FileCabinet() {
     new Set(['period', 'tasks', 'trial-balance'])
   )
   const [downloadingZip, setDownloadingZip] = useState(false)
+  const [previewConfig, setPreviewConfig] = useState<{
+    title: string
+    fetchUrl?: string
+    downloadUrl?: string
+    mimeType?: string | null
+    isExternal?: boolean
+    externalUrl?: string
+  } | null>(null)
 
   useEffect(() => {
     loadPeriods()
@@ -151,9 +162,35 @@ export default function FileCabinet() {
     if (file.is_external_link && file.external_url) {
       window.open(file.external_url, '_blank')
     } else {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-      window.open(`${API_URL}/files/${file.task_id || 'period'}/${file.filename}`, '_blank')
+      window.open(`${API_BASE}/api/files/download/${file.id}?inline=0`, '_blank')
     }
+  }
+
+  const handlePreviewFile = (file: FileInfo) => {
+    if (file.is_external_link && file.external_url) {
+      setPreviewConfig({
+        title: file.original_filename,
+        isExternal: true,
+        externalUrl: file.external_url,
+      })
+      return
+    }
+
+    setPreviewConfig({
+      title: file.original_filename,
+      fetchUrl: `${API_BASE}/api/files/download/${file.id}?inline=1`,
+      downloadUrl: `${API_BASE}/api/files/download/${file.id}?inline=0`,
+      mimeType: file.mime_type,
+    })
+  }
+
+  const handlePreviewTrialBalanceFile = (file: TrialBalanceFile) => {
+    setPreviewConfig({
+      title: file.original_filename,
+      fetchUrl: `${API_BASE}${file.file_path}`,
+      downloadUrl: `${API_BASE}${file.file_path}`,
+      mimeType: file.mime_type,
+    })
   }
 
   const handleDeleteFile = async (fileId: number) => {
@@ -231,7 +268,7 @@ export default function FileCabinet() {
         key={file.id}
         className="flex items-center hover:bg-blue-50 px-2 py-1 group cursor-pointer"
         style={{ paddingLeft: `${level * 20}px` }}
-        onClick={() => handleDownloadFile(file)}
+        onClick={() => handlePreviewFile(file)}
       >
         <div className="flex items-center flex-1 min-w-0">
           {getFileIcon(file.mime_type)}
@@ -242,6 +279,16 @@ export default function FileCabinet() {
         </div>
         <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <span className="text-xs text-gray-500 mr-2">{formatFileSize(file.file_size)}</span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              handlePreviewFile(file)
+            }}
+            className="p-1 text-gray-600 hover:text-blue-600 rounded"
+            title="Preview"
+          >
+            <Eye className="w-3.5 h-3.5" />
+          </button>
           <button
             onClick={(e) => {
               e.stopPropagation()
@@ -279,10 +326,7 @@ export default function FileCabinet() {
         key={file.id}
         className="flex items-center hover:bg-blue-50 px-2 py-1 group cursor-pointer"
         style={{ paddingLeft: `${level * 20}px` }}
-        onClick={() => {
-          const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-          window.open(`${API_URL}${file.file_path}`, '_blank')
-        }}
+        onClick={() => handlePreviewTrialBalanceFile(file)}
       >
         <div className="flex items-center flex-1 min-w-0">
           {getFileIcon(file.mime_type)}
@@ -298,8 +342,18 @@ export default function FileCabinet() {
           <button
             onClick={(e) => {
               e.stopPropagation()
-              const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-              window.open(`${API_URL}${file.file_path}`, '_blank')
+              handlePreviewTrialBalanceFile(file)
+            }}
+            className="p-1 text-gray-600 hover:text-blue-600 rounded"
+            title="Preview"
+          >
+            <Eye className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              const url = `${API_BASE}${file.file_path}`
+              window.open(url, '_blank')
             }}
             className="p-1 text-gray-600 hover:text-blue-600 rounded"
             title="Download"
@@ -540,7 +594,18 @@ export default function FileCabinet() {
           onUploadComplete={loadFileCabinetData}
         />
       )}
+      {previewConfig && (
+        <FilePreviewModal
+          open={Boolean(previewConfig)}
+          title={previewConfig.title}
+          fetchUrl={previewConfig.fetchUrl}
+          downloadUrl={previewConfig.downloadUrl}
+          mimeType={previewConfig.mimeType}
+          isExternal={previewConfig.isExternal}
+          externalUrl={previewConfig.externalUrl}
+          onClose={() => setPreviewConfig(null)}
+        />
+      )}
     </div>
   )
 }
-

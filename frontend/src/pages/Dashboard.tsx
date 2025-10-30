@@ -1,11 +1,15 @@
+import type { ComponentType } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { 
-  CheckCircle, 
-  Clock, 
-  AlertCircle, 
+import { Link } from 'react-router-dom'
+import {
+  CheckCircle,
+  Clock,
+  AlertCircle,
   TrendingUp,
   Calendar,
-  Users
+  Users,
+  AlertTriangle,
+  PauseCircle
 } from 'lucide-react'
 import api from '../lib/api'
 import { formatDate } from '../lib/utils'
@@ -17,6 +21,17 @@ interface DashboardStats {
   overdue_tasks: number
   tasks_due_today: number
   completion_percentage: number
+  avg_time_to_complete?: number | null
+  blocked_tasks: TaskSummary[]
+  review_tasks: TaskSummary[]
+  at_risk_tasks: TaskSummary[]
+}
+
+interface TaskSummary {
+  id: number
+  name: string
+  status: string
+  due_date?: string
 }
 
 export default function Dashboard() {
@@ -114,6 +129,32 @@ export default function Dashboard() {
         </div>
       )}
 
+      {stats && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <WorkflowColumn
+            title="Blocked Tasks"
+            icon={PauseCircle}
+            tasks={stats.blocked_tasks}
+            emptyMessage="No blocked tasks right now."
+            link="/tasks?status=blocked"
+          />
+          <WorkflowColumn
+            title="Needs Review"
+            icon={Users}
+            tasks={stats.review_tasks}
+            emptyMessage="Nothing in review."
+            link="/tasks?review=1"
+          />
+          <WorkflowColumn
+            title="At-Risk Deadlines"
+            icon={AlertTriangle}
+            tasks={stats.at_risk_tasks}
+            emptyMessage="No upcoming risks."
+            link="/tasks?status=in_progress"
+          />
+        </div>
+      )}
+
       {/* My tasks */}
       <div className="card">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">My Recent Tasks</h2>
@@ -147,6 +188,11 @@ export default function Dashboard() {
             ))
           )}
         </div>
+        <div className="mt-4 text-right">
+          <Link to="/tasks?mine=1" className="text-sm text-primary-600 hover:text-primary-700">
+            View all my tasks →
+          </Link>
+        </div>
       </div>
     </div>
   )
@@ -174,3 +220,40 @@ function getStatusLabel(status: string): string {
   return labels[status] || status
 }
 
+interface WorkflowColumnProps {
+  title: string
+  icon: ComponentType<{ className?: string }>
+  tasks: TaskSummary[]
+  emptyMessage: string
+  link: string
+}
+
+function WorkflowColumn({ title, icon: Icon, tasks, emptyMessage, link }: WorkflowColumnProps) {
+  return (
+    <div className="card h-full">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+          <Icon className="w-4 h-4 text-primary-600" />
+          {title}
+        </h3>
+        <Link to={link} className="text-xs text-primary-600 hover:text-primary-700">
+          View all →
+        </Link>
+      </div>
+      <div className="space-y-3">
+        {tasks.length === 0 ? (
+          <p className="text-sm text-gray-500">{emptyMessage}</p>
+        ) : (
+          tasks.map((task) => (
+            <div key={task.id} className="p-3 rounded-lg border border-gray-200 bg-gray-50">
+              <p className="text-sm font-medium text-gray-900 line-clamp-2">{task.name}</p>
+              {task.due_date && (
+                <p className="text-xs text-gray-600 mt-1">Due {formatDate(task.due_date)}</p>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}

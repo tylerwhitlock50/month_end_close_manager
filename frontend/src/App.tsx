@@ -9,6 +9,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Tasks from './pages/Tasks'
 import Periods from './pages/Periods'
+import PeriodDetail from './pages/PeriodDetail'
 import Templates from './pages/Templates'
 import TrialBalance from './pages/TrialBalance'
 import Users from './pages/Users'
@@ -30,6 +31,7 @@ function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/periods" element={<Periods />} />
+        <Route path="/periods/:periodId" element={<PeriodDetail />} />
         <Route path="/templates" element={<Templates />} />
         <Route path="/trial-balance" element={<TrialBalance />} />
         <Route path="/file-cabinet" element={<FileCabinet />} />

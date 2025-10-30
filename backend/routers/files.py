@@ -1,6 +1,6 @@
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File as FastAPIFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.orm import Session, joinedload
 import os
 import uuid
@@ -70,6 +70,39 @@ async def get_file(
     db.commit()
     
     return file
+
+
+@router.get("/download/{file_id}")
+async def stream_file(
+    file_id: int,
+    inline: bool = True,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    file = db.query(FileModel).filter(FileModel.id == file_id).first()
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if file.is_external_link:
+        raise HTTPException(status_code=400, detail="External links cannot be previewed")
+
+    if not file.file_path or not os.path.exists(file.file_path):
+        raise HTTPException(status_code=404, detail="File content missing")
+
+    file.last_accessed_at = datetime.utcnow()
+    db.commit()
+
+    disposition = 'inline' if inline else 'attachment'
+    headers = {
+        "Content-Disposition": f"{disposition}; filename=\"{file.original_filename}\""
+    }
+
+    return FileResponse(
+        path=file.file_path,
+        media_type=file.mime_type or 'application/octet-stream',
+        filename=file.original_filename,
+        headers=headers
+    )
 
 
 @router.get("/old-files/", response_model=List[File])

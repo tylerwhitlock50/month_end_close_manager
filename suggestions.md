@@ -319,6 +319,153 @@ This document contains comprehensive suggestions for improving the Month-End Clo
 
 ---
 
+## 🔗 ERP & System Integrations
+
+### 21. NetSuite Trial Balance Auto-Import & Transform
+**Problem:** NetSuite exports trial balances in a specific format that requires manual manipulation before uploading to the month-end close app. Users must open Excel, reformat columns, rename headers, remove summary rows, and save—adding 10-15 minutes of manual work each month.
+
+**Solution:** Add a dedicated "Import from NetSuite" option that automatically handles NetSuite's standard trial balance export format:
+
+**NetSuite-Specific Features:**
+- One-click "Import NetSuite TB" button on Trial Balance page
+- Auto-detect NetSuite format (header rows, column names, summary sections)
+- Automatically map NetSuite columns to app fields:
+  - "Account" → account_number
+  - "Account Name" → account_name  
+  - "Type" → account_type
+  - "Debit Balance" → debit
+  - "Credit Balance" → credit
+  - "Net Balance" → ending_balance
+- Strip out NetSuite header rows, subtotals, and footer summaries
+- Handle NetSuite account hierarchies (parent/child accounts)
+- Support multiple NetSuite export formats:
+  - Standard Trial Balance
+  - Trial Balance with Sub-Accounts
+  - Comparative Trial Balance (current + prior period)
+
+**Transformation Logic:**
+- Remove non-data rows (headers, summaries, totals)
+- Parse account numbers from combined "1000 - Cash" format
+- Convert NetSuite date formats to ISO format
+- Handle NetSuite-specific account types (Bank, Accounts Receivable, Other Current Asset, etc.)
+- Calculate ending_balance as debit - credit (or credit - debit based on account type)
+- Flag accounts with "Total" or "Subtotal" in name as parent accounts
+
+**Import Workflow:**
+1. User clicks "Import NetSuite TB" button
+2. Upload NetSuite CSV/Excel export
+3. System auto-detects format and shows preview:
+   - "Detected NetSuite Standard Trial Balance format"
+   - "Found 247 accounts, 12 parent accounts excluded"
+   - Preview first 10 accounts with mapped columns
+4. User confirms or adjusts mappings (if needed)
+5. System imports and creates/updates trial balance accounts
+6. Show import summary:
+   - "✅ 235 accounts imported"
+   - "📝 15 new accounts added"
+   - "🔄 220 accounts updated"
+   - "⚠️ 3 accounts need attention (mismatched types)"
+
+**Advanced Features:**
+- **Auto-period detection:** Extract period from NetSuite filename or header
+- **Multi-subsidiary support:** Handle consolidated TBs with subsidiary columns
+- **Account mapping memory:** Remember custom account type mappings
+- **Validation rules:** Verify trial balance balances (debits = credits)
+- **Change detection:** Highlight accounts with significant variance from prior period
+- **Saved NetSuite profiles:** Different formats for different subsidiaries/configurations
+
+**Error Handling:**
+- Clear error messages for unrecognized formats
+- Suggestions for fixing common issues
+- "Download sample NetSuite export" template
+- Rollback option if import has issues
+
+**Future Enhancements:**
+- Direct NetSuite API integration (no file upload needed)
+- Real-time sync with NetSuite
+- Auto-schedule monthly imports
+- Support for other NetSuite reports (A/R Aging, A/P Aging, etc.)
+- Extend to other ERP systems (QuickBooks, SAP, Sage)
+
+**Implementation Details:**
+```python
+# Backend: New endpoint
+POST /api/trial-balance/import-netsuite
+- Accept CSV or Excel file
+- Detect NetSuite format using headers/patterns
+- Parse and transform data
+- Create/update TrialBalance and TrialBalanceAccount records
+- Return import summary
+```
+
+**Impact:**
+- Eliminates 10-15 minutes of manual reformatting per month
+- Reduces errors from manual data manipulation
+- Provides consistent, repeatable import process
+- Enables one-person close workflows
+- Foundation for full NetSuite integration
+
+**Priority:** Medium-High (6-8 hours for basic implementation, 12-15 hours with advanced features)
+
+**User Stories:**
+- *As a staff accountant*, I want to export from NetSuite and import directly without Excel manipulation
+- *As a controller*, I want confidence that TB imports are accurate and complete
+- *As an IT admin*, I want to configure NetSuite mappings once and reuse them
+
+---
+
+## 📊 Period-over-Period Comparison
+
+### 22. Prior Period File Comparison & Quick Access
+**Problem:** Finance teams frequently need to compare current month files to prior month equivalents (e.g., "How did we handle this reconciliation last month?"). Currently, users must navigate to the previous period, find the matching task, locate the file, download it, then return to the current period.
+
+**Solution:** Add "Prior Period" quick links throughout the application:
+
+**File Cabinet:**
+- Add "View Previous Period" button that shows last month's files side-by-side
+- Show previous period files in a split-pane view (current month left, prior month right)
+- Add "Compare to Last Month" option that highlights differences in file lists
+
+**Task Detail Modal:**
+- Add "Previous Period Files" section showing files from the same task name in prior period
+- Show a "Last Month" tab alongside current files
+- Display comparison indicators: "3 files last month, 2 files this month"
+- Add quick download button for prior period equivalents
+
+**Trial Balance:**
+- Add "Prior Period Balance" column next to ending balance
+- Show variance and % change between periods
+- Link to prior period account detail with one click
+- "Compare to Last Month" button that shows account-by-account changes
+
+**Implementation Details:**
+- Match tasks by name or template ID across periods
+- Match trial balance accounts by account number
+- Show "No prior period data" message when viewing first period
+- Add navigation breadcrumb: "Current: Jan 2025 | Compare to: Dec 2024"
+- Cache prior period data to avoid repeated queries
+
+**Advanced Features:**
+- Multi-period comparison (compare Jan 2025 to Jan 2024 for YoY analysis)
+- "Copy from Last Month" button to auto-upload similar files
+- Smart suggestions: "Last month you uploaded 'Bank Rec.xlsx' on Day 3"
+- Timeline view showing when files were uploaded across periods
+
+**Impact:** 
+- Eliminates context-switching between periods
+- Speeds up month-over-month consistency checks
+- Reduces time spent searching for "how we did it last time"
+- Improves quality through easy comparison
+
+**Priority:** High (4-6 hours for basic implementation, 8-10 hours with advanced features)
+
+**User Stories:**
+- *As a preparer*, I want to see last month's reconciliation side-by-side so I can follow the same format
+- *As a reviewer*, I want to quickly compare account balances month-over-month to spot anomalies
+- *As a controller*, I want to see if we're uploading files earlier or later than prior periods
+
+---
+
 ## 📅 Implementation Roadmap
 
 ### Phase 1: Quick Wins (Week 1)
@@ -332,32 +479,59 @@ This document contains comprehensive suggestions for improving the Month-End Clo
 ### Phase 2: Core Features (Weeks 2-3)
 - ⏳ #9: Comment feed (3-4 hours)
 - ⏳ #4: Bottleneck dashboard (2-3 hours)
-- ⏳ #3: Bulk task actions (3-4 hours)
+- ✅ #3: Bulk task actions (3-4 hours)
 - ⏳ #15: My Reviews queue (3-4 hours)
 
 **Total Effort:** ~15 hours  
 **Impact:** Major workflow enhancement
 
-### Phase 3: Advanced Features (Weeks 4-6)
-- 🔲 #6: Notification system (4-5 hours)
-- 🔲 #10: Period detail page (6-8 hours)
+### Phase 3: Advanced Features (Weeks 4-5)
+- ✅ #6: Notification system (4-5 hours)
+- ✅ #10: Period detail page (6-8 hours)
 - 🔲 #7: Dependencies visualization (6-8 hours)
 - 🔲 #18: Smart TB filters (3-4 hours)
 
 **Total Effort:** ~25 hours  
 **Impact:** Complete workflow transformation
 
-### Phase 4: Polish & Future Enhancements (Ongoing)
-- 🔲 #5: File preview (4-6 hours)
-- 🔲 #11: Period setup wizard (6-8 hours)
+### Phase 4: Integration & Period Intelligence (Weeks 6-7) **⭐ NEW**
+**Focus:** High-value features for NetSuite users and period-over-period workflows
+
+- 🔲 #21: NetSuite TB auto-import (6-8 hours basic implementation)
+  - Auto-detect NetSuite format
+  - Column mapping & transformation
+  - Import validation & summary
+  - Error handling
+- 🔲 #22: Prior period comparison (4-6 hours basic implementation)
+  - File Cabinet: side-by-side view
+  - Task Detail: "Last Month" tab
+  - Trial Balance: prior period columns
+  - Navigation & caching
 - 🔲 #12: What's New banner (2-3 hours)
+  - Highlight changes after TB import
+  - Auto-linked tasks
+  - Unlinked accounts alert
+
+**Total Effort:** ~16 hours (basic implementations)  
+**Impact:** Major time savings for month-over-month consistency and NetSuite users
+
+**ROI:** These features address the most common pain points:
+- NetSuite import saves 10-15 min/month
+- Prior period comparison eliminates constant navigation
+- Combined: ~20-30 min savings per close cycle
+
+### Phase 5: Polish & Future Enhancements (Ongoing)
+- ✅ #5: File preview (4-6 hours)
+- 🔲 #11: Period setup wizard (6-8 hours)
 - 🔲 #16: Account timelines (4-5 hours)
 - 🔲 #13: Upload presets (3-4 hours)
 - 🔲 #17: Template analytics (8-10 hours)
 - 🔲 #19: Tooltips & help (3-4 hours)
 - 🔲 #20: Drag-and-drop reorder (2-3 hours)
+- 🔲 #21 Advanced: NetSuite API integration (6-8 hours)
+- 🔲 #22 Advanced: Multi-period comparison (4-6 hours)
 
-**Total Effort:** ~40 hours  
+**Total Effort:** ~48 hours  
 **Impact:** Professional polish and advanced capabilities
 
 ---
@@ -365,14 +539,49 @@ This document contains comprehensive suggestions for improving the Month-End Clo
 ## 🎯 High-Impact Summary
 
 **Top 5 Most Impactful Changes:**
-1. **Global Period Selector (#8)** - Eliminates repetitive context switching
-2. **My Reviews Queue (#15)** - Centralizes reviewer workflow
-3. **Quick Status Updates (#1)** - Saves time on most common action
-4. **Comment/Activity Feed (#9)** - Enables collaboration and audit trails
-5. **Period Detail Page (#10)** - Single source of truth for close status
+1. **Global Period Selector (#8)** - Eliminates repetitive context switching → Phase 1 ✅
+2. **Prior Period Comparison (#22)** - Streamlines month-over-month workflows → Phase 4 ⭐
+3. **NetSuite TB Auto-Import (#21)** - Eliminates manual reformatting → Phase 4 ⭐
+4. **My Reviews Queue (#15)** - Centralizes reviewer workflow → Phase 2
+5. **Quick Status Updates (#1)** - Saves time on most common action → Phase 1 ✅
 
-**Total Estimated Effort for All Suggestions:** ~110 hours  
+**Honorable Mentions:**
+- **Comment/Activity Feed (#9)** - Enables collaboration and audit trails → Phase 2
+- **Period Detail Page (#10)** - Single source of truth for close status → Phase 3 ✅
+- **Bulk Task Actions (#3)** - Essential for managing large close cycles → Phase 2 ✅
+- **Notification System (#6)** - Prevents missed deadlines → Phase 3 ✅
+
+---
+
+### 📊 Development Timeline
+
+**Phase 1 (Week 1):** Quick wins - ~3 hours  
+**Phase 2 (Weeks 2-3):** Core workflow - ~15 hours  
+**Phase 3 (Weeks 4-5):** Advanced features - ~25 hours  
+**Phase 4 (Weeks 6-7):** Integration & period intelligence - ~16 hours ⭐ NEW  
+**Phase 5 (Ongoing):** Polish & enhancements - ~48 hours  
+
+**Total Estimated Effort:** ~107 hours (core features) + ~17 hours (advanced integrations) = **~124 hours**  
 **Estimated Business Impact:** 30-40% reduction in close cycle time
+
+---
+
+### 💡 Quick ROI Features
+
+For teams looking for immediate value, prioritize these:
+
+1. **Week 1-2:** Phase 1 + Phase 2 = ~18 hours
+   - Global period selector, My Tasks filter, Quick status updates
+   - Comment feed, Bulk actions, My Reviews queue
+   - **Impact:** 15-20% time savings immediately
+
+2. **Week 3-7:** Add Phase 4 = +16 hours
+   - NetSuite auto-import, Prior period comparison
+   - **Impact:** Additional 10-15% savings (especially for NetSuite users)
+
+3. **Total to MVP:** ~34 hours for 80% of the value
+
+**Special Note for NetSuite Users:** Phase 4 should be prioritized right after Phase 1-2. The NetSuite TB Auto-Import feature (#21) alone saves 10-15 minutes per month and virtually eliminates import errors, making it a quick ROI for teams using NetSuite.
 
 ---
 
