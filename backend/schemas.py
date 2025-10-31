@@ -390,6 +390,46 @@ class PeriodDetail(BaseModel):
     trial_balance_files_count: int
 
 
+# Review Queue Schemas
+class ReviewTask(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    status: TaskStatus
+    due_date: Optional[datetime] = None
+    assignee: Optional[User] = None
+    period: Period
+    file_count: int = 0
+    is_overdue: bool = False
+    department: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class ReviewApproval(BaseModel):
+    id: int
+    task_id: int
+    task_name: str
+    status: ApprovalStatus
+    notes: Optional[str] = None
+    requested_at: datetime
+    period: Period
+    assignee: Optional[User] = None
+    file_count: int = 0
+    is_overdue: bool = False
+    
+    class Config:
+        from_attributes = True
+
+
+class MyReviewsResponse(BaseModel):
+    review_tasks: List[ReviewTask] = []
+    pending_approvals: List[ReviewApproval] = []
+    total_pending: int = 0
+    overdue_count: int = 0
+
+
 # Reporting Schemas
 class TaskReport(BaseModel):
     task_id: int

@@ -8,6 +8,7 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Tasks from './pages/Tasks'
+import Reviews from './pages/Reviews'
 import Periods from './pages/Periods'
 import PeriodDetail from './pages/PeriodDetail'
 import Templates from './pages/Templates'
@@ -30,6 +31,7 @@ function App() {
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/tasks" element={<Tasks />} />
+        <Route path="/reviews" element={<Reviews />} />
         <Route path="/periods" element={<Periods />} />
         <Route path="/periods/:periodId" element={<PeriodDetail />} />
         <Route path="/templates" element={<Templates />} />

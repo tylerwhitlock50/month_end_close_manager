@@ -24,3 +24,6 @@ CREATE INDEX idx_files_period_id ON files(period_id);
 -- Verification query - check that all files now have either task_id or period_id
 -- SELECT id, task_id, period_id FROM files WHERE task_id IS NULL AND period_id IS NULL;
 
+
+
+

@@ -143,7 +143,7 @@ export default function Dashboard() {
             icon={Users}
             tasks={stats.review_tasks}
             emptyMessage="Nothing in review."
-            link="/tasks?review=1"
+            link="/reviews"
           />
           <WorkflowColumn
             title="At-Risk Deadlines"

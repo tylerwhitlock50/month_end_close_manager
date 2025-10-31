@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Calendar, User, Paperclip } from 'lucide-react'
+import { Calendar, User, Paperclip, CheckCircle2 } from 'lucide-react'
 import api from '../lib/api'
-import { formatDate, getStatusColor, getStatusLabel } from '../lib/utils'
+import { formatDate, getStatusColor } from '../lib/utils'
 
 interface TaskBoardProps {
   tasks: any[]
@@ -17,6 +18,7 @@ const STATUSES = [
 
 export default function TaskBoard({ tasks, onSelectTask }: TaskBoardProps) {
   const queryClient = useQueryClient()
+  const [updatingTaskId, setUpdatingTaskId] = useState<number | null>(null)
 
   const updateTaskMutation = useMutation({
     mutationFn: async ({ taskId, status }: { taskId: number; status: string }) => {
@@ -26,9 +28,13 @@ export default function TaskBoard({ tasks, onSelectTask }: TaskBoardProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
     },
+    onSettled: () => {
+      setUpdatingTaskId(null)
+    },
   })
 
   const handleStatusChange = (taskId: number, newStatus: string) => {
+    setUpdatingTaskId(taskId)
     updateTaskMutation.mutate({ taskId, status: newStatus })
   }
 
@@ -105,18 +111,51 @@ export default function TaskBoard({ tasks, onSelectTask }: TaskBoardProps) {
 
                     {/* Quick status change */}
                     <div className="mt-3 pt-3 border-t border-gray-200 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <select
-                        value={task.status}
-                        onChange={(e) => handleStatusChange(task.id, e.target.value)}
-                        className="w-full text-xs input py-1"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {STATUSES.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={task.status}
+                          onChange={(e) => handleStatusChange(task.id, e.target.value)}
+                          className="flex-1 text-xs input py-1"
+                          disabled={updateTaskMutation.isPending && updatingTaskId === task.id}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {STATUSES.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleStatusChange(task.id, 'complete')
+                          }}
+                          disabled={
+                            task.status === 'complete' ||
+                            (updateTaskMutation.isPending && updatingTaskId === task.id)
+                          }
+                          className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                            task.status === 'complete'
+                              ? 'bg-green-100 text-green-700 border border-green-200'
+                              : 'bg-primary-600 text-white border border-primary-600 hover:bg-primary-700'
+                          }`}
+                        >
+                          {updateTaskMutation.isPending && updatingTaskId === task.id ? (
+                            'Saving...'
+                          ) : task.status === 'complete' ? (
+                            <>
+                              <CheckCircle2 className="w-4 h-4" />
+                              Completed
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="w-4 h-4" />
+                              Mark Complete
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))

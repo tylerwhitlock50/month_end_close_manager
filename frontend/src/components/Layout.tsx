@@ -11,7 +11,8 @@ import {
   Menu,
   FileSpreadsheet,
   ClipboardList,
-  FolderOpen
+  FolderOpen,
+  ClipboardCheck
 } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { useQuery } from '@tanstack/react-query'
@@ -75,9 +76,19 @@ export default function Layout({ children }: LayoutProps) {
     }
   }, [periods, selectedPeriodId, setPeriod])
 
+  const { data: reviewCount } = useQuery({
+    queryKey: ['review-count'],
+    queryFn: async () => {
+      const response = await api.get('/api/dashboard/my-reviews')
+      return response.data.total_pending as number
+    },
+    refetchInterval: 60000, // Refresh every minute
+  })
+
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Tasks', href: '/tasks', icon: CheckSquare },
+    { name: 'Reviews', href: '/reviews', icon: ClipboardCheck, badge: reviewCount },
     { name: 'Periods', href: '/periods', icon: Calendar },
     { name: 'Templates', href: '/templates', icon: ClipboardList },
     { name: 'Trial Balance', href: '/trial-balance', icon: FileSpreadsheet },
@@ -117,14 +128,21 @@ export default function Layout({ children }: LayoutProps) {
                 <Link
                   key={item.name}
                   to={item.href}
-                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors ${
+                  className={`flex items-center justify-between px-4 py-3 text-sm font-medium rounded-lg transition-colors ${
                     isActive
                       ? 'bg-primary-50 text-primary-600'
                       : 'text-gray-700 hover:bg-gray-100'
                   }`}
                 >
-                  <Icon className="w-5 h-5 mr-3" />
-                  {item.name}
+                  <div className="flex items-center">
+                    <Icon className="w-5 h-5 mr-3" />
+                    {item.name}
+                  </div>
+                  {item.badge !== undefined && item.badge > 0 && (
+                    <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-red-500 rounded-full">
+                      {item.badge > 9 ? '9+' : item.badge}
+                    </span>
+                  )}
                 </Link>
               )
             })}

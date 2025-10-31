@@ -82,3 +82,6 @@ DROP INDEX IF EXISTS idx_files_period_id;
 - Existing file uploads will continue to work unchanged after migration
 - New functionality allows uploading files directly to periods without task assignment
 
+
+
+

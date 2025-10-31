@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from datetime import datetime, timedelta
 
 from backend.database import get_db
@@ -10,9 +10,12 @@ from backend.models import (
     Period as PeriodModel,
     User as UserModel,
     TaskStatus,
-    PeriodStatus
+    PeriodStatus,
+    Approval as ApprovalModel,
+    ApprovalStatus,
+    File as FileModel
 )
-from backend.schemas import DashboardStats, TaskSummary
+from backend.schemas import DashboardStats, TaskSummary, MyReviewsResponse, ReviewTask, ReviewApproval
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -104,5 +107,106 @@ async def get_dashboard_stats(
         blocked_tasks=blocked_tasks[:5],
         review_tasks=review_tasks[:5],
         at_risk_tasks=at_risk_tasks[:5]
+    )
+
+
+@router.get("/my-reviews", response_model=MyReviewsResponse)
+async def get_my_reviews(
+    period_id: int = None,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Get all items awaiting review by the current user."""
+    # Get tasks in review status where user is owner or assignee
+    tasks_query = (
+        db.query(TaskModel)
+        .join(PeriodModel)
+        .filter(TaskModel.status == TaskStatus.REVIEW)
+        .filter(
+            or_(
+                TaskModel.owner_id == current_user.id,
+                TaskModel.assignee_id == current_user.id
+            )
+        )
+    )
+    
+    if period_id:
+        tasks_query = tasks_query.filter(TaskModel.period_id == period_id)
+    else:
+        tasks_query = tasks_query.filter(PeriodModel.is_active == True)
+    
+    tasks = tasks_query.order_by(TaskModel.due_date.asc()).all()
+    
+    # Get pending approvals assigned to user
+    approvals_query = (
+        db.query(ApprovalModel)
+        .join(TaskModel, ApprovalModel.task_id == TaskModel.id)
+        .join(PeriodModel, TaskModel.period_id == PeriodModel.id)
+        .filter(ApprovalModel.reviewer_id == current_user.id)
+        .filter(ApprovalModel.status == ApprovalStatus.PENDING)
+    )
+    
+    if period_id:
+        approvals_query = approvals_query.filter(TaskModel.period_id == period_id)
+    else:
+        approvals_query = approvals_query.filter(PeriodModel.is_active == True)
+    
+    approvals = approvals_query.order_by(ApprovalModel.requested_at.asc()).all()
+    
+    now = datetime.utcnow()
+    
+    # Build review tasks
+    review_tasks = []
+    overdue_count = 0
+    
+    for task in tasks:
+        file_count = db.query(FileModel).filter(FileModel.task_id == task.id).count()
+        is_overdue = task.due_date and task.due_date < now
+        if is_overdue:
+            overdue_count += 1
+        
+        review_tasks.append(ReviewTask(
+            id=task.id,
+            name=task.name,
+            description=task.description,
+            status=task.status,
+            due_date=task.due_date,
+            assignee=task.assignee,
+            period=task.period,
+            file_count=file_count,
+            is_overdue=is_overdue,
+            department=task.department
+        ))
+    
+    # Build approval items
+    pending_approvals = []
+    
+    for approval in approvals:
+        task = approval.task
+        file_count = db.query(FileModel).filter(FileModel.task_id == task.id).count()
+        is_overdue = task.due_date and task.due_date < now
+        if is_overdue:
+            overdue_count += 1
+        
+        pending_approvals.append(ReviewApproval(
+            id=approval.id,
+            task_id=task.id,
+            task_name=task.name,
+            status=approval.status,
+            notes=approval.notes,
+            requested_at=approval.requested_at,
+            period=task.period,
+            assignee=task.assignee,
+            file_count=file_count,
+            is_overdue=is_overdue
+        ))
+    
+    total_pending = len(review_tasks) + len(pending_approvals)
+    
+    return MyReviewsResponse(
+        review_tasks=review_tasks,
+        pending_approvals=pending_approvals,
+        total_pending=total_pending,
+        overdue_count=overdue_count
     )
 

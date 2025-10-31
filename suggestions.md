@@ -587,3 +587,45 @@ For teams looking for immediate value, prioritize these:
 
 *Last updated: {{DATE}}*
 *Status: Active planning document*
+### 21. Variance / Flux Analysis Workflow
+**Problem:** Controllers need to explain material trial balance swings each period, but the app lacks a structured way to surface MoM/YoY/budget variances and capture explanations.
+
+**Solution:**
+- Compute absolute and percentage deltas per account/entity from imported trial balance snapshots.
+- Flag items breaching configurable thresholds (e.g., |Δ%| > 15%, |Δ$| > $10k) and generate a Flux Queue with owners, due dates, and immutable explanation threads.
+- Provide a Flux Dashboard (Δ$, Δ%, budget variance, owner, status), account detail view with trend chart, evidence attachments, and filters by entity/department/threshold presets.
+- Back end: extend data model with `account_period_metrics`, `flux_items`, `flux_explanations`; expose APIs (`GET /api/flux`, `POST /api/flux/{id}/explanations`, `PATCH /api/flux/{id}`) and nightly `flux_recompute_daily` job.
+
+**Impact:** Creates an auditable flux review, ensuring every flagged variance is owned, explained, and ready before marking the period closed.
+
+**Priority:** High
+
+---
+
+### 22. Requests “Chaser” Automation
+**Problem:** Prep and review teams burn time chasing documents, answers, and sign-offs through ad-hoc email and Slack threads.
+
+**Solution:**
+- Let users create templated outreach tied to tasks or flux items, inject placeholders (period, due date, links), and send via email/Slack (`POST /api/requests`, `/api/requests/{id}/send`).
+- Track delivery, opens, replies, and auto-schedule reminders per cadence; ingest responses/attachments via inbound email and Slack webhooks to update status.
+- Surface a Requests Board (Pending → Completed), request detail modal, and message preview UI; store data in `requests` and `request_messages` tables and drive reminders with `requests_nudge_runner` job.
+
+**Impact:** Centralizes follow-ups, raises response rates, and keeps supporting evidence linked to the right task without manual wrangling.
+
+**Priority:** High
+
+---
+
+### 23. Bottleneck & Workload Analytics
+**Problem:** Leadership lacks visibility into where the close stalls and how workload is distributed, making it hard to rebalance or hit the close deadline.
+
+**Solution:**
+- Mine audit logs and task history to compute cycle times, SLA adherence, aging-in-status, and dependency-driven critical paths; optionally materialize `task_time_slices` for faster queries.
+- Deliver dashboards with throughput metrics, workload heatmaps, bottleneck widgets, and a Critical Path list; expose supporting APIs (`GET /api/analytics/bottlenecks`, `/throughput`, `/critical-path`) and refresh aggregates via `analytics_rollup_hourly` job.
+- Gate detailed user-level views to Admin/Reviewer roles while keeping summary analytics visible to all.
+
+**Impact:** Highlights overdue hotspots, predicts completion velocity, and informs staffing adjustments for future periods.
+
+**Priority:** High
+
+---
