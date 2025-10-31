@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { X, Paperclip, Loader2, Download, CheckCircle2, MessageSquare } from 'lucide-react'
+import { X, Paperclip, Loader2, Download, CheckCircle2, MessageSquare, History } from 'lucide-react'
 import api from '../lib/api'
 import { formatDate, formatDateTime, getStatusLabel } from '../lib/utils'
 import FilePreviewModal from './FilePreviewModal'
+import TaskTimeline from './TaskTimeline'
 
 interface TaskDetailModalProps {
   taskId: number
@@ -48,13 +49,32 @@ interface TaskUpdateForm {
   priority?: number
 }
 
-interface TaskActivityEvent {
-  id: string
-  event_type: 'comment' | 'activity'
-  message: string
+interface PriorTaskFile {
+  id: number
+  filename: string
+  original_filename: string
+  file_size: number
+  mime_type?: string
+  uploaded_at: string
+  uploaded_by?: { id: number; name: string }
+}
+
+interface PriorTaskComment {
+  id: number
+  content: string
   created_at: string
-  user: { id: number; name: string }
-  metadata?: Record<string, any>
+  user?: { id: number; name: string }
+}
+
+interface PriorTaskSnapshot {
+  task_id: number
+  period_id: number
+  period_name: string
+  name: string
+  status: string
+  due_date?: string
+  files: PriorTaskFile[]
+  comments: PriorTaskComment[]
 }
 
 const STATUS_OPTIONS = [
@@ -112,11 +132,19 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
     },
   })
 
-  const { data: activityEvents, refetch: refetchActivity } = useQuery<TaskActivityEvent[]>({
-    queryKey: ['task-activity', taskId],
+  const { data: priorTask } = useQuery<PriorTaskSnapshot | null>({
+    queryKey: ['task-prior', taskId],
+    enabled: Boolean(taskId),
     queryFn: async () => {
-      const response = await api.get(`/api/tasks/${taskId}/activity`)
-      return response.data
+      try {
+        const response = await api.get(`/api/tasks/${taskId}/prior`)
+        return response.data as PriorTaskSnapshot
+      } catch (error: any) {
+        if (error.response?.status === 404) {
+          return null
+        }
+        throw error
+      }
     },
   })
 
@@ -175,7 +203,7 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
       refetchTask()
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       onUpdated()
-      refetchActivity()
+      queryClient.invalidateQueries({ queryKey: ['task-activity', taskId, 'infinite'] })
     },
   })
 
@@ -203,7 +231,7 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
       setSupportFileDate('')
       refetchFiles()
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      refetchActivity()
+      queryClient.invalidateQueries({ queryKey: ['task-activity', taskId, 'infinite'] })
     } catch (error: any) {
       setUploadError(error.response?.data?.detail || 'Failed to upload file')
     } finally {
@@ -224,7 +252,7 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
       setCommentContent('')
       setCommentInternal(false)
       setCommentError('')
-      refetchActivity()
+      queryClient.invalidateQueries({ queryKey: ['task-activity', taskId, 'infinite'] })
     },
     onError: (error: any) => {
       setCommentError(error.response?.data?.detail || 'Unable to add comment')
@@ -281,6 +309,11 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
     if (taskData.owner?.name) parts.push(`Owner: ${taskData.owner.name}`)
     return parts.join(' · ')
   }, [taskData])
+
+  const handlePriorFileDownload = (fileId: number) => {
+    const base = api.defaults.baseURL || ''
+    window.open(`${base.replace(/\/$/, '')}/api/files/download/${fileId}?inline=0`, '_blank')
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -434,58 +467,110 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
               </div>
             </section>
 
-            <section className="border border-gray-200 rounded-lg p-4 space-y-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-                <MessageSquare className="w-4 h-4" /> Timeline & Comments
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-3">
-                  <textarea
-                    className="input min-h-[120px]"
-                    placeholder="Leave an update or review note"
-                    value={commentContent}
-                    onChange={(event) => {
-                      setCommentError('')
-                      setCommentContent(event.target.value)
-                    }}
-                  />
-                  <label className="inline-flex items-center text-xs text-gray-600 gap-2">
-                    <input
-                      type="checkbox"
-                      checked={commentInternal}
-                      onChange={(event) => setCommentInternal(event.target.checked)}
-                    />
-                    Internal note (visible only to the close team)
-                  </label>
-                  {commentError && <p className="text-xs text-red-600">{commentError}</p>}
-                  <button
-                    type="button"
-                    className="btn-secondary text-xs"
-                    onClick={handleCommentSubmit}
-                    disabled={addCommentMutation.isPending}
-                  >
-                    {addCommentMutation.isPending ? 'Posting...' : 'Post Comment'}
-                  </button>
+            {priorTask && (
+              <section className="border border-blue-200 rounded-lg p-4 space-y-3 bg-blue-50">
+                <div className="flex items-center gap-2 text-sm font-semibold text-blue-900">
+                  <History className="w-4 h-4" /> Prior Period Context
                 </div>
-                <div className="space-y-3 max-h-64 overflow-y-auto border border-dashed border-gray-200 rounded-lg p-3">
-                  {activityEvents && activityEvents.length > 0 ? (
-                    activityEvents.map((event) => (
-                      <div key={event.id} className="text-sm text-gray-700 border-b border-gray-200 pb-3 last:border-b-0 last:pb-0">
-                        <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-                          <span>{event.user?.name ?? 'System'}</span>
-                          <span>{formatDateTime(event.created_at)}</span>
-                        </div>
-                        <p className="text-gray-800 whitespace-pre-line">{event.message}</p>
-                        {event.event_type === 'comment' && event.metadata?.is_internal && (
-                          <span className="inline-flex items-center text-[10px] font-medium text-amber-700 bg-amber-100 border border-amber-200 rounded px-2 py-0.5 mt-2">
-                            Internal
-                          </span>
+                <p className="text-xs text-blue-800">
+                  {priorTask.period_name} • {getStatusLabel(priorTask.status)}
+                  {priorTask.due_date ? ` • Due ${formatDate(priorTask.due_date)}` : ''}
+                </p>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <p className="text-xs uppercase text-blue-700 font-semibold mb-2">Files</p>
+                    {priorTask.files.length === 0 ? (
+                      <p className="text-xs text-blue-700">No files were attached last period.</p>
+                    ) : (
+                      <ul className="space-y-2 text-sm">
+                        {priorTask.files.slice(0, 5).map((file) => (
+                          <li key={file.id} className="flex items-center justify-between">
+                            <div className="truncate pr-3">
+                              <button
+                                type="button"
+                                className="text-primary-600 hover:text-primary-800"
+                                onClick={() => handlePriorFileDownload(file.id)}
+                              >
+                                {file.original_filename}
+                              </button>
+                              <span className="text-xs text-blue-600 block">
+                                {(file.file_size / 1024).toFixed(1)} KB • {formatDateTime(file.uploaded_at)}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              className="text-blue-600 hover:text-blue-800"
+                              onClick={() => handlePriorFileDownload(file.id)}
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                          </li>
+                        ))}
+                        {priorTask.files.length > 5 && (
+                          <li className="text-xs text-blue-700">{priorTask.files.length - 5} more…</li>
                         )}
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-xs text-gray-500">No activity yet.</p>
-                  )}
+                      </ul>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase text-blue-700 font-semibold mb-2">Recent Comments</p>
+                    {priorTask.comments.length === 0 ? (
+                      <p className="text-xs text-blue-700">No comments were recorded last period.</p>
+                    ) : (
+                      <ul className="space-y-2 text-sm text-blue-900">
+                        {priorTask.comments.slice(0, 5).map((comment) => (
+                          <li key={comment.id} className="border border-blue-200 bg-white rounded-md p-2">
+                            <p className="text-xs text-blue-800 mb-1">
+                              {comment.user?.name ?? 'Team member'} • {formatDateTime(comment.created_at)}
+                            </p>
+                            <p className="text-sm text-blue-900 whitespace-pre-line">{comment.content}</p>
+                          </li>
+                        ))}
+                        {priorTask.comments.length > 5 && (
+                          <li className="text-xs text-blue-700">{priorTask.comments.length - 5} more…</li>
+                        )}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
+
+            <section className="border border-gray-200 rounded-lg p-4 space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                  <MessageSquare className="w-4 h-4" /> Timeline & Comments
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-3">
+                    <textarea
+                      className="input min-h-[120px]"
+                      placeholder="Leave an update or review note"
+                      value={commentContent}
+                      onChange={(event) => {
+                        setCommentError('')
+                        setCommentContent(event.target.value)
+                      }}
+                    />
+                    <label className="inline-flex items-center text-xs text-gray-600 gap-2">
+                      <input
+                        type="checkbox"
+                        checked={commentInternal}
+                        onChange={(event) => setCommentInternal(event.target.checked)}
+                      />
+                      Internal note (visible only to the close team)
+                    </label>
+                    {commentError && <p className="text-xs text-red-600">{commentError}</p>}
+                    <button
+                      type="button"
+                      className="btn-secondary text-xs"
+                      onClick={handleCommentSubmit}
+                      disabled={addCommentMutation.isPending}
+                    >
+                      {addCommentMutation.isPending ? 'Posting...' : 'Post Comment'}
+                    </button>
+                  </div>
+                  <TaskTimeline taskId={taskId} />
                 </div>
               </div>
             </section>

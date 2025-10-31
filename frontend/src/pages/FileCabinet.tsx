@@ -15,8 +15,9 @@ import {
   FileSpreadsheet,
   Image as ImageIcon,
   Eye,
+  History,
 } from 'lucide-react'
-import api, { fetchPeriodFiles, downloadPeriodZip, deleteFile } from '../lib/api'
+import api, { fetchPeriodFiles, fetchPriorPeriodFiles, downloadPeriodZip, deleteFile } from '../lib/api'
 import FileUploadModal from '../components/FileUploadModal'
 import FilePreviewModal from '../components/FilePreviewModal'
 
@@ -80,7 +81,10 @@ export default function FileCabinet() {
   const [periods, setPeriods] = useState<Period[]>([])
   const [selectedPeriod, setSelectedPeriod] = useState<number | null>(null)
   const [cabinetData, setCabinetData] = useState<FileCabinetData | null>(null)
+  const [priorCabinetData, setPriorCabinetData] = useState<FileCabinetData | null>(null)
   const [loading, setLoading] = useState(false)
+  const [loadingPrior, setLoadingPrior] = useState(false)
+  const [priorError, setPriorError] = useState<string | null>(null)
   const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(['period', 'tasks', 'trial-balance'])
@@ -101,6 +105,8 @@ export default function FileCabinet() {
 
   useEffect(() => {
     if (selectedPeriod) {
+      setPriorCabinetData(null)
+      setPriorError(null)
       loadFileCabinetData()
     }
   }, [selectedPeriod])
@@ -141,6 +147,27 @@ export default function FileCabinet() {
       alert('Failed to load files. Please try again.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadPriorFileCabinetData = async () => {
+    if (!selectedPeriod) return
+
+    setLoadingPrior(true)
+    setPriorError(null)
+    try {
+      const data = await fetchPriorPeriodFiles(selectedPeriod)
+      setPriorCabinetData(data)
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        setPriorError('No previous period files available.')
+        setPriorCabinetData(null)
+      } else {
+        console.error('Failed to load prior period files:', error)
+        setPriorError('Failed to load previous period files. Please try again.')
+      }
+    } finally {
+      setLoadingPrior(false)
     }
   }
 
@@ -191,6 +218,110 @@ export default function FileCabinet() {
       downloadUrl: `${API_BASE}${file.file_path}`,
       mimeType: file.mime_type,
     })
+  }
+
+  const renderPriorFiles = (files: FileInfo[]) => {
+    if (files.length === 0) {
+      return <p className="text-xs text-gray-500">None</p>
+    }
+    return (
+      <ul className="space-y-2">
+        {files.slice(0, 5).map((file) => (
+          <li key={`prior-file-${file.id}`} className="flex items-center justify-between text-sm">
+            <button
+              type="button"
+              className="text-primary-600 hover:text-primary-800 text-left truncate pr-3"
+              onClick={() => handlePreviewFile(file)}
+            >
+              {file.original_filename}
+            </button>
+            <button
+              type="button"
+              className="text-gray-500 hover:text-gray-700"
+              onClick={() => handleDownloadFile(file)}
+            >
+              <Download className="w-4 h-4" />
+            </button>
+          </li>
+        ))}
+        {files.length > 5 && (
+          <li className="text-xs text-gray-500">{files.length - 5} more…</li>
+        )}
+      </ul>
+    )
+  }
+
+  const renderPriorTaskFiles = (tasks: TaskWithFiles[]) => {
+    const allFiles = tasks.flatMap((task) =>
+      task.files.map((file) => ({ ...file, taskName: task.name }))
+    )
+
+    if (allFiles.length === 0) {
+      return <p className="text-xs text-gray-500">None</p>
+    }
+
+    return (
+      <ul className="space-y-2">
+        {allFiles.slice(0, 5).map((file) => (
+          <li key={`prior-task-file-${file.id}`} className="flex items-center justify-between text-sm">
+            <div className="truncate pr-3">
+              <span className="text-gray-500 text-xs mr-2">{file.taskName}</span>
+              <button
+                type="button"
+                className="text-primary-600 hover:text-primary-800"
+                onClick={() => handlePreviewFile(file)}
+              >
+                {file.original_filename}
+              </button>
+            </div>
+            <button
+              type="button"
+              className="text-gray-500 hover:text-gray-700"
+              onClick={() => handleDownloadFile(file)}
+            >
+              <Download className="w-4 h-4" />
+            </button>
+          </li>
+        ))}
+        {allFiles.length > 5 && (
+          <li className="text-xs text-gray-500">{allFiles.length - 5} more…</li>
+        )}
+      </ul>
+    )
+  }
+
+  const renderPriorTrialBalanceFiles = (files: TrialBalanceFile[]) => {
+    if (files.length === 0) {
+      return <p className="text-xs text-gray-500">None</p>
+    }
+    return (
+      <ul className="space-y-2">
+        {files.slice(0, 5).map((file) => (
+          <li key={`prior-tb-file-${file.id}`} className="flex items-center justify-between text-sm">
+            <div className="truncate pr-3">
+              <span className="text-gray-500 text-xs mr-2">{file.account_number}</span>
+              <button
+                type="button"
+                className="text-primary-600 hover:text-primary-800"
+                onClick={() => handlePreviewTrialBalanceFile(file)}
+              >
+                {file.original_filename}
+              </button>
+            </div>
+            <button
+              type="button"
+              className="text-gray-500 hover:text-gray-700"
+              onClick={() => window.open(`${API_BASE}${file.file_path}`, '_blank')}
+            >
+              <Download className="w-4 h-4" />
+            </button>
+          </li>
+        ))}
+        {files.length > 5 && (
+          <li className="text-xs text-gray-500">{files.length - 5} more…</li>
+        )}
+      </ul>
+    )
   }
 
   const handleDeleteFile = async (fileId: number) => {
@@ -399,6 +530,14 @@ export default function FileCabinet() {
               <Download className="w-4 h-4" />
               <span>{downloadingZip ? 'Preparing...' : 'Download All as ZIP'}</span>
             </button>
+            <button
+              onClick={loadPriorFileCabinetData}
+              disabled={!selectedPeriod || loadingPrior}
+              className="flex items-center space-x-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <History className={`w-4 h-4 ${loadingPrior ? 'animate-spin' : ''}`} />
+              <span>{loadingPrior ? 'Loading prior...' : 'Load Previous Period'}</span>
+            </button>
           </div>
         </div>
 
@@ -418,6 +557,48 @@ export default function FileCabinet() {
           </select>
         </div>
       </div>
+
+      {priorError && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {priorError}
+        </div>
+      )}
+
+      {priorCabinetData && (
+        <div className="card mb-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">
+                Previous Period: {priorCabinetData.period.name}
+              </h2>
+              <p className="text-sm text-gray-500">
+                Quick links to files from the prior close to help with comparisons.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPriorCabinetData(null)}
+              className="text-sm text-primary-600 hover:text-primary-800"
+            >
+              Hide
+            </button>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Period Files</h3>
+              {renderPriorFiles(priorCabinetData.period_files)}
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Task Files</h3>
+              {renderPriorTaskFiles(priorCabinetData.task_files)}
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Trial Balance Files</h3>
+              {renderPriorTrialBalanceFiles(priorCabinetData.trial_balance_files)}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Content - File Tree View */}
       {loading ? (

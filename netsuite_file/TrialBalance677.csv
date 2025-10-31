@@ -1,0 +1,205 @@
+"Future Comp, LLC"
+Parent Company (Consolidated)
+Trial Balance
+End of Oct 2025
+
+
+Account ,Debit ,Credit 
+10000 - Cash,,
+10010 - Checking Account,,
+10010 - Checking Account,"$165,289.63",
+Total - 10010 - Checking Account,"$165,289.63",$0.00
+Total - 10000 - Cash,"$165,289.63",$0.00
+11000 - Accounts Receivable,,
+11010 - Receivables-Trade,"$198,518.73",
+11099 - Allowance for Doubtful Accounts,,"$30,214.42"
+Total - 11000 - Accounts Receivable,"$198,518.73","$30,214.42"
+12000 - Inventory,,
+12010 - Raw Material,"$1,740,812.83",
+12030 - Inventory - WIP,"$139,463.91",
+12050 - Inventory - FG,"$491,410.90",
+12090 - Inventory Allowance,,"$759,638.37"
+Total - 12000 - Inventory,"$2,371,687.64","$759,638.37"
+13000 - Prepaids,,
+13010 - Prepaid Software,"$9,632.14",
+13020 - Prepaid Insurance,"$57,409.08",
+13030 - Prepaid Property Tax,"$60,820.38",
+13040 - Prepaid Tooling,$926.49,
+13060 - Purchase Rtn-Credit not Rec'd,"$82,522.74",
+13090 - Undeposited Funds,"$12,797.54",
+Total - 13000 - Prepaids,"$224,108.37",$0.00
+15000 - Fixed Assets @ Cost,,
+15020 - Buildings,"$10,619,825.06",
+15040 - Tooling,"$129,276.07",
+15050 - Computer Equipment,"$92,626.15",
+15060 - Furniture & Fixtures,"$204,821.46",
+15070 - Motor Vehicles,"$37,135.43",
+15075 - Skyshare,"$552,500.00",
+15080 - Mfg Equipment,"$8,364,843.48",
+15099 - Construction in Progress,"$1,901,619.09",
+15180 - Financing Lease Assets (US Bank),"$357,680.00",
+Total - 15000 - Fixed Assets @ Cost,"$22,260,326.74",$0.00
+15500 - Accumulated Depreciation,,
+15520 - Buildings - Accum. Depr.,,"$1,246,548.68"
+15550 - Computer Equip. - Accum. Depr.,,"$93,882.81"
+15560 - Furn. & Fixtures - Accum. Depr.,,"$73,822.94"
+15570 - Motor Vehicles - Accum. Depr.,,"$13,408.83"
+15580 - Mfg Equipment - Accum. Depr.,,"$3,081,470.41"
+15680 - Finance Lease Accum-dep mfg equip,,"$99,705.26"
+Total - 15500 - Accumulated Depreciation,$0.00,"$4,608,838.93"
+16000 - Other Long-Term Assets,,
+16010 - Patents,"$11,335.26",
+16020 - Accrued Rent Receivable,"$90,288.24",
+16030 - Intercompany Clearing Account,,"$951,546.49"
+Total - 16000 - Other Long-Term Assets,"$101,623.50","$951,546.49"
+20000 - Accounts Payable,,
+20010 - Accounts Payable - Trade,,"$465,995.27"
+Total - 20000 - Accounts Payable,$0.00,"$465,995.27"
+20011 - Ramp Card,,"$19,034.20"
+21000 - Payroll Liability,,
+21030 - Payroll Benefits Payable,,"$58,555.66"
+Total - 21000 - Payroll Liability,$0.00,"$58,555.66"
+22000 - Other Current Liabilities,,
+22005 - Customer Deposits,,"$4,720.12"
+22020 - Sales Tax Payable,,"$1,407.16"
+22050 - Accrued Purchases,,"$140,426.33"
+Total - 22000 - Other Current Liabilities,$0.00,"$146,553.61"
+24500 - Deferred Loan Fees,,
+24510 - Deferred Loan Fees,"$15,666.52",
+Total - 24500 - Deferred Loan Fees,"$15,666.52",$0.00
+25000 - Long Term Liability,,
+25010 - Loans - Building - Long Term,,"$8,746,706.63"
+25020 - Loans - Equip. - Long Term,,"$224,515.69"
+25030 - Loans - Working Capital,,"$4,006,301.99"
+25042 - Bank of Idaho,,"$536,330.23"
+25050 - Loans - Enhanced Capital,,"$2,000,000.00"
+25060 - Loans - Shareholder,,
+25060 - Loans - Shareholder,,"$160,000.00"
+25061 - Shareholder Loan - Jason,,"$11,290,021.84"
+25062 - Shareholder Loan - Roland,,"$10,076,451.80"
+Total - 25060 - Loans - Shareholder,$0.00,"$21,526,473.64"
+26010 - Financing Lease Liability (US Bank),,"$134,865.48"
+26020 - Financing Lease Liability (Highland),,"$102,627.41"
+Total - 25000 - Long Term Liability,$0.00,"$37,277,821.07"
+30000 - Equity,,
+30010 - Retained Earnings,"$12,425,320.41",
+Total - 30000 - Equity,"$12,425,320.41",$0.00
+40000 - Revenue,,
+40010 - Revenue - Product,,"$1,313,701.13"
+40020 - Revenue - Tooling,,"$313,462.73"
+40040 - Revenue - Shipping & Handling,,"$43,198.73"
+40045 - Payment Processing Fees,,"$1,838.20"
+42000 - Rent Revenue,,"$6,449.20"
+Total - 40000 - Revenue,$0.00,"$1,678,649.99"
+41000 - Revenue Adjustments,,
+41010 - Sales Discounts,,
+41010 - Sales Discounts,,$0.01
+41011 - Promotional Discounts,"$26,682.94",
+Total - 41010 - Sales Discounts,"$26,682.94",$0.01
+41030 - Credit Card Fees,$127.00,
+Total - 41000 - Revenue Adjustments,"$26,809.94",$0.01
+50000 - Cost of Goods Sold,,
+50010 - Cost of Goods Sold - Product,"$832,512.27",
+Total - 50000 - Cost of Goods Sold,"$832,512.27",$0.00
+51000 - Labor - Manufacturing,,
+51010 - Labor - Direct,"$1,678,472.49",
+51020 - Labor - Direct - Taxes,"$126,869.09",
+51030 - Labor - Direct - Benefits,"$194,288.69",
+51040 - Labor - Direct - Workers Comp,"$19,038.71",
+54030 - Mfg Labor Absorbed,,"$798,157.54"
+Total - 51000 - Labor - Manufacturing,"$2,018,668.98","$798,157.54"
+52000 - Mfg Ovhd Labor,,
+52010 - Mfg Ovhd Labor,"$14,648.79",
+52020 - Mfg Ovhd Labor - Taxes,"$1,503.55",
+52030 - Mfg Ovhd Labor - Benefits,"$102,145.55",
+Total - 52000 - Mfg Ovhd Labor,"$118,297.89",$0.00
+53000 - Mfg Ovhd Costs,,
+53010 - Repairs & Maintenance,"$49,995.35",
+53015 - Mfg Ovhd costs - Non Capitalized Tooling,"$36,034.99",
+53020 - Floor Supplies,"$136,310.57",
+53030 - Shipping,"$201,664.23",
+53050 - Electricity,"$79,684.28",
+53070 - Water/Sewer,"$6,776.65",
+53080 - Packaging Supplies,"$53,872.49",
+53090 - Safety,"$6,482.00",
+53100 - Fuel - Vehicles,"$14,589.66",
+53110 - Fuel - Plant Equip.,$963.66,
+53130 - Tool Maintenance & Repair,"$11,593.20",
+53200 - Depreciation,$13.71,
+Total - 53000 - Mfg Ovhd Costs,"$597,980.79",$0.00
+54000 - Mfg Variances,,
+54020 - Material Use Variance,$236.58,
+54040 - Mfg Ovhd Absorbed,,"$63,753.49"
+54050 - Mfg OSP Variance,,$931.22
+54060 - Purchase Price Variance,"$111,935.37",
+54070 - Mfg Price Variance,"$200,416.78",
+54080 - Mfg Production Qty Variance,"$41,934.60",
+54090 - Scrap Parts,"$43,738.09",
+54100 - Other Inventory Adj.,"$6,318.15",
+54110 - Slow Moving Inventory Adj.,"$5,921.63",
+54120 - Inventory Revaluation,"$58,591.16",
+Total - 54000 - Mfg Variances,"$469,092.36","$64,684.71"
+60000 - SG&A,,
+60010 - SG&A Labor,"$713,840.49",
+60020 - SG&A Labor - Taxes,"$59,524.43",
+60030 - SG&A Labor - Benefits,,
+60030 - SG&A Labor - Benefits,"$217,593.42",
+60039 - Employee Benefits Reimbursement,,"$111,269.03"
+Total - 60030 - SG&A Labor - Benefits,"$217,593.42","$111,269.03"
+60110 - Hiring & Recruiting,"$69,474.32",
+60115 - Meals and Entertainment,"$8,960.13",
+60130 - Education & Training,"$10,036.00",
+60140 - Consulting Fees,"$449,684.78",
+60150 - Computer Supplies,"$15,616.16",
+60160 - Software Expense,"$251,550.95",
+60170 - Sales & Use Tax,"$14,701.79",
+60180 - Purchase Discount,,$141.44
+60190 - Acctg Fees,"$29,836.19",
+60200 - Bank Charges,"$22,361.80",
+60210 - Outside Payroll Fees,"$10,098.12",
+60220 - Electricity,,
+60220 - Electricity,"$75,043.00",
+60221 - Electricity Reimbursement,,"$15,661.53"
+Total - 60220 - Electricity,"$75,043.00","$15,661.53"
+60230 - Gas Utility,"$14,482.92",
+60240 - Water/Sewer,"$8,902.00",
+60250 - Communication,"$49,823.91",
+60260 - Dues & Subscriptions,,"$1,970.00"
+60270 - Insurance,"$104,020.68",
+60280 - Legal Fees,"$114,394.00",
+60290 - Licenses & Permits,$146.00,
+60300 - Office Supplies,"$9,139.51",
+60310 - Property Taxes,"$22,807.62",
+60330 - Travel,"$96,461.46",
+60350 - Selling Fees & Charges,"$4,388.27",
+60400 - R&D Expense,"$345,089.67",
+60500 - General Misc Expenses,"$9,431.52",
+60600 - Marketing Expenses,,
+60600 - Marketing Expenses,"$96,102.34",
+60601 - Digital Marketing,"$393,026.83",
+60602 - Trade Show Fees,"$14,838.84",
+60603 - Sales Rewards,"$2,189.33",
+60604 - Promotional Products,$696.49,
+60605 - Sale and Marketing Meals,"$4,979.56",
+60606 - Sales Travel,"$18,223.31",
+Total - 60600 - Marketing Expenses,"$530,056.70",$0.00
+Total - 60000 - SG&A,"$3,257,465.84","$129,042.00"
+69000 - Depreciation & Amortization,,
+69010 - Depreciation Expense,"$947,663.84",
+69020 - Amortization Expense,$683.32,
+Total - 69000 - Depreciation & Amortization,"$948,347.16",$0.00
+70000 - Other Income & Expenses,,
+70010 - Interest Expense,"$904,192.54",
+70020 - Bad Debt Expense,,"$16,730.55"
+70045 - Skyshare,"$175,527.00",
+70055 - Owner Benefits & Allowances,"$449,958.54",
+70060 - Misc. Income,,"$4,280.90"
+70061 - Rental Income,,"$552,592.56"
+70062 - Rounding Gain/Loss,,$0.62
+Total - 70000 - Other Income & Expenses,"$1,529,678.08","$573,604.63"
+70040 - Exchange Realized Gain/Loss,$51.17,
+90000 - Taxes,,
+90010 - Taxes-Federal,$15.88,
+90020 - Taxes-State,$875.00,
+Total - 90000 - Taxes,$890.88,$0.00
+Total,"$47,562,336.90","$47,562,336.90"

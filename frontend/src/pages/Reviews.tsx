@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ClipboardCheck,
@@ -68,6 +68,8 @@ export default function Reviews() {
     itemName: ''
   })
   const [actionNotes, setActionNotes] = useState('')
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<number>>(new Set())
+  const [showOverdueOnly, setShowOverdueOnly] = useState(false)
 
   const { data: reviews, isLoading, refetch } = useQuery<MyReviewsResponse>({
     queryKey: ['my-reviews', selectedPeriodId],
@@ -83,6 +85,7 @@ export default function Reviews() {
       queryClient.invalidateQueries({ queryKey: ['my-reviews'] })
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['review-count'] })
       setActionModal({ type: null, itemId: null, itemType: null, itemName: '' })
       setActionNotes('')
     },
@@ -102,8 +105,31 @@ export default function Reviews() {
       queryClient.invalidateQueries({ queryKey: ['my-reviews'] })
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['review-count'] })
       setActionModal({ type: null, itemId: null, itemType: null, itemName: '' })
       setActionNotes('')
+    },
+  })
+
+  const bulkUpdateMutation = useMutation({
+    mutationFn: async (status: string) => {
+      const taskIds = Array.from(selectedTaskIds)
+      if (taskIds.length === 0) {
+        return null
+      }
+
+      const response = await api.post('/api/tasks/bulk-update', {
+        task_ids: taskIds,
+        status,
+      })
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['my-reviews'] })
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['review-count'] })
+      setSelectedTaskIds(new Set())
     },
   })
 
@@ -133,15 +159,81 @@ export default function Reviews() {
     setActionNotes('')
   }
 
-  // Filter reviews by department
-  const filteredTasks = departmentFilter
-    ? reviews?.review_tasks.filter(task => task.department === departmentFilter) || []
-    : reviews?.review_tasks || []
+  useEffect(() => {
+    if (!reviews?.review_tasks) {
+      setSelectedTaskIds(new Set())
+      return
+    }
 
-  // Get unique departments
-  const departments = Array.from(
-    new Set(reviews?.review_tasks.map(task => task.department).filter(Boolean))
+    setSelectedTaskIds((prev) => {
+      const validIds = new Set(reviews.review_tasks.map((task) => task.id))
+      const retained = new Set<number>()
+      prev.forEach((id) => {
+        if (validIds.has(id)) {
+          retained.add(id)
+        }
+      })
+
+      if (retained.size === prev.size) {
+        return prev
+      }
+      return retained
+    })
+  }, [reviews?.review_tasks])
+
+  const toggleTaskSelection = (taskId: number) => {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(taskId)) {
+        next.delete(taskId)
+      } else {
+        next.add(taskId)
+      }
+      return next
+    })
+  }
+
+  const clearSelection = () => setSelectedTaskIds(new Set())
+
+  const filteredTasks = useMemo(() => {
+    if (!reviews?.review_tasks) return []
+
+    return reviews.review_tasks.filter((task) => {
+      const matchesDepartment = departmentFilter ? task.department === departmentFilter : true
+      const matchesOverdue = showOverdueOnly ? task.is_overdue : true
+      return matchesDepartment && matchesOverdue
+    })
+  }, [reviews?.review_tasks, departmentFilter, showOverdueOnly])
+
+  const departments = useMemo(
+    () => Array.from(new Set(reviews?.review_tasks.map((task) => task.department).filter(Boolean))),
+    [reviews?.review_tasks]
   )
+
+  const allVisibleIds = filteredTasks.map((task) => task.id)
+  const allSelected = filteredTasks.length > 0 && filteredTasks.every((task) => selectedTaskIds.has(task.id))
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      clearSelection()
+      return
+    }
+    setSelectedTaskIds(new Set(allVisibleIds))
+  }
+
+  const selectionCount = selectedTaskIds.size
+  const hasSelection = selectionCount > 0
+
+  const bulkMarkComplete = () => {
+    if (!hasSelection) return
+    bulkUpdateMutation.mutate('complete')
+  }
+
+  const bulkSendBack = () => {
+    if (!hasSelection) return
+    bulkUpdateMutation.mutate('in_progress')
+  }
+
+  const bulkBusy = bulkUpdateMutation.isPending
 
   const getActionButtonLabel = () => {
     if (actionModal.type === 'approve') return 'Approve'
@@ -173,6 +265,22 @@ export default function Reviews() {
           <p className="text-gray-600 mt-1">Items awaiting your review and approval</p>
         </div>
         <div className="flex items-center gap-4">
+          <label className="flex items-center gap-2 text-sm text-gray-600">
+            <input
+              type="checkbox"
+              checked={showOverdueOnly}
+              onChange={(event) => setShowOverdueOnly(event.target.checked)}
+            />
+            Overdue only
+          </label>
+          <button
+            type="button"
+            onClick={toggleSelectAll}
+            className="text-sm text-primary-600 hover:text-primary-700 disabled:text-gray-400"
+            disabled={filteredTasks.length === 0}
+          >
+            {allSelected ? 'Clear selection' : 'Select all'}
+          </button>
           <select
             className="input text-sm"
             value={departmentFilter}
@@ -187,6 +295,36 @@ export default function Reviews() {
           </select>
         </div>
       </div>
+
+      {/* Stats cards */}
+      {hasSelection && (
+        <div className="card border border-primary-200 bg-primary-50 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-primary-800 font-medium">
+            {selectionCount} task{selectionCount > 1 ? 's' : ''} selected for bulk action
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn-secondary text-xs"
+              onClick={bulkSendBack}
+              disabled={bulkBusy}
+            >
+              {bulkBusy ? 'Working…' : 'Send back to work'}
+            </button>
+            <button
+              type="button"
+              className="btn-success text-xs"
+              onClick={bulkMarkComplete}
+              disabled={bulkBusy}
+            >
+              {bulkBusy ? 'Working…' : 'Mark complete'}
+            </button>
+            <button type="button" className="text-xs text-gray-500 hover:text-gray-700" onClick={clearSelection}>
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Stats cards */}
       {reviews && (
@@ -249,62 +387,74 @@ export default function Reviews() {
                   <p>No tasks awaiting review</p>
                 </div>
               ) : (
-                filteredTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className={`p-4 rounded-lg border-2 transition-all hover:shadow-md ${
-                      task.is_overdue
-                        ? 'border-red-300 bg-red-50'
-                        : 'border-gray-200 bg-white hover:border-primary-300'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-gray-900 mb-1">{task.name}</h3>
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600">
-                          <span className="flex items-center gap-1">
-                            <Calendar className="w-3 h-3" />
-                            {task.period.name}
-                          </span>
-                          {task.assignee && (
+                filteredTasks.map((task) => {
+                  const isSelected = selectedTaskIds.has(task.id)
+                  return (
+                    <div
+                      key={task.id}
+                      className={`p-4 rounded-lg border-2 transition-all hover:shadow-md ${
+                        task.is_overdue
+                          ? 'border-red-300 bg-red-50'
+                          : 'border-gray-200 bg-white hover:border-primary-300'
+                      } ${isSelected ? 'ring-2 ring-primary-300 border-primary-400' : ''}`}
+                    >
+                      <div className="flex items-start gap-3 mb-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 text-primary-600"
+                          checked={isSelected}
+                          onChange={() => toggleTaskSelection(task.id)}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-gray-900 mb-1">{task.name}</h3>
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600">
                             <span className="flex items-center gap-1">
-                              <User className="w-3 h-3" />
-                              {task.assignee.name}
+                              <Calendar className="w-3 h-3" />
+                              {task.period.name}
                             </span>
+                            {task.assignee && (
+                              <span className="flex items-center gap-1">
+                                <User className="w-3 h-3" />
+                                {task.assignee.name}
+                              </span>
+                            )}
+                            {task.file_count > 0 && (
+                              <span className="flex items-center gap-1">
+                                <Paperclip className="w-3 h-3" />
+                                {task.file_count} file{task.file_count !== 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
+                          {task.due_date && (
+                            <p className={`text-xs mt-1 ${task.is_overdue ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
+                              Due: {formatDate(task.due_date)}
+                              {task.is_overdue && ' (Overdue)'}
+                            </p>
                           )}
-                          {task.file_count > 0 && (
-                            <span className="flex items-center gap-1">
-                              <Paperclip className="w-3 h-3" />
-                              {task.file_count} file{task.file_count !== 1 ? 's' : ''}
-                            </span>
+                          {task.description && (
+                            <p className="text-xs text-gray-500 mt-2 line-clamp-2">{task.description}</p>
                           )}
                         </div>
-                        {task.due_date && (
-                          <p className={`text-xs mt-1 ${task.is_overdue ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
-                            Due: {formatDate(task.due_date)}
-                            {task.is_overdue && ' (Overdue)'}
-                          </p>
-                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setSelectedTaskId(task.id)}
+                          className="btn-secondary text-xs flex-1"
+                        >
+                          View Details
+                        </button>
+                        <button
+                          onClick={() => openActionModal('complete', task.id, 'task', task.name)}
+                          className="btn-success text-xs"
+                          disabled={updateTaskMutation.isPending}
+                        >
+                          <CheckCircle className="w-3 h-3 mr-1" />
+                          Mark Complete
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setSelectedTaskId(task.id)}
-                        className="btn-secondary text-xs flex-1"
-                      >
-                        View Details
-                      </button>
-                      <button
-                        onClick={() => openActionModal('complete', task.id, 'task', task.name)}
-                        className="btn-success text-xs"
-                        disabled={updateTaskMutation.isPending}
-                      >
-                        <CheckCircle className="w-3 h-3 mr-1" />
-                        Complete
-                      </button>
-                    </div>
-                  </div>
-                ))
+                  )
+                })
               )}
             </div>
           </div>

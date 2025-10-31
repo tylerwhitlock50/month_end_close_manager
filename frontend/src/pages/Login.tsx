@@ -72,9 +72,10 @@ export default function Login() {
           {/* Login form */}
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             <div>
-              <label className="label">Email</label>
+              <label className="label" htmlFor="login-email">Email</label>
               <input
                 type="email"
+                id="login-email"
                 {...register('username', { 
                   required: 'Email is required',
                   pattern: {
@@ -91,9 +92,10 @@ export default function Login() {
             </div>
 
             <div>
-              <label className="label">Password</label>
+              <label className="label" htmlFor="login-password">Password</label>
               <input
                 type="password"
+                id="login-password"
                 {...register('password', { required: 'Password is required' })}
                 className="input"
                 placeholder="••••••••"

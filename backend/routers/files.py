@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File as FastAPIFile
 from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.orm import Session, joinedload
@@ -38,6 +38,117 @@ def get_file_age_days(file: FileModel) -> int:
     return (datetime.now() - file.uploaded_at).days
 
 
+def _find_previous_period(db: Session, period: PeriodModel) -> Optional[PeriodModel]:
+    prev_month = period.month - 1
+    prev_year = period.year
+    if prev_month <= 0:
+        prev_month = 12
+        prev_year -= 1
+
+    candidate = (
+        db.query(PeriodModel)
+        .filter(
+            PeriodModel.close_type == period.close_type,
+            PeriodModel.year == prev_year,
+            PeriodModel.month == prev_month,
+        )
+        .order_by(PeriodModel.id.desc())
+        .first()
+    )
+    if candidate:
+        return candidate
+
+    return (
+        db.query(PeriodModel)
+        .filter(PeriodModel.close_type == period.close_type)
+        .filter(
+            (PeriodModel.year < period.year)
+            | ((PeriodModel.year == period.year) & (PeriodModel.month < period.month))
+        )
+        .order_by(PeriodModel.year.desc(), PeriodModel.month.desc())
+        .first()
+    )
+
+
+def _build_file_cabinet_structure(db: Session, period: PeriodModel) -> FileCabinetStructure:
+    period_id = period.id
+
+    period_files = db.query(FileModel).options(joinedload(FileModel.task)).filter(
+        FileModel.period_id == period_id,
+        FileModel.task_id.is_(None)
+    ).all()
+
+    def _with_user(file: FileModel):
+        uploaded_by = None
+        if file.uploaded_by_id:
+            uploaded_by = db.query(UserModel).filter(UserModel.id == file.uploaded_by_id).first()
+        return {
+            "id": file.id,
+            "task_id": file.task_id,
+            "period_id": file.period_id,
+            "filename": file.filename,
+            "original_filename": file.original_filename,
+            "file_size": file.file_size,
+            "mime_type": file.mime_type,
+            "description": file.description,
+            "file_date": file.file_date,
+            "is_external_link": file.is_external_link,
+            "external_url": file.external_url,
+            "uploaded_at": file.uploaded_at,
+            "last_accessed_at": file.last_accessed_at,
+            "uploaded_by": uploaded_by,
+        }
+
+    period_files_with_user = [_with_user(file) for file in period_files]
+
+    tasks = db.query(TaskModel).filter(TaskModel.period_id == period_id).all()
+    task_files_list = []
+    for task in tasks:
+        task_files = db.query(FileModel).filter(FileModel.task_id == task.id).all()
+        files_with_user = [_with_user(file) for file in task_files]
+        task_files_list.append(
+            {
+                "id": task.id,
+                "name": task.name,
+                "status": task.status,
+                "files": files_with_user,
+            }
+        )
+
+    trial_balance_files = []
+    trial_balances = db.query(TrialBalanceModel).filter(
+        TrialBalanceModel.period_id == period_id
+    ).options(joinedload(TrialBalanceModel.accounts)).all()
+
+    for tb in trial_balances:
+        for account in tb.accounts:
+            attachments = db.query(TrialBalanceAttachmentModel).filter(
+                TrialBalanceAttachmentModel.account_id == account.id
+            ).all()
+            for attachment in attachments:
+                trial_balance_files.append(
+                    {
+                        "id": attachment.id,
+                        "account_id": account.id,
+                        "account_number": account.account_number,
+                        "account_name": account.account_name,
+                        "filename": attachment.filename,
+                        "original_filename": attachment.original_filename,
+                        "file_size": attachment.file_size,
+                        "mime_type": attachment.mime_type,
+                        "description": attachment.description,
+                        "file_date": attachment.file_date,
+                        "uploaded_at": attachment.uploaded_at,
+                        "file_path": attachment.file_path,
+                    }
+                )
+
+    return {
+        "period": period,
+        "period_files": period_files_with_user,
+        "task_files": task_files_list,
+        "trial_balance_files": trial_balance_files,
+    }
 @router.get("/task/{task_id}", response_model=List[File])
 async def get_task_files(
     task_id: int,
@@ -307,111 +418,25 @@ async def get_period_files(
     if not period:
         raise HTTPException(status_code=404, detail="Period not found")
     
-    # Get period-level files
-    period_files = db.query(FileModel).options(
-        joinedload(FileModel.task)
-    ).filter(
-        FileModel.period_id == period_id,
-        FileModel.task_id.is_(None)
-    ).all()
-    
-    period_files_with_user = []
-    for file in period_files:
-        uploaded_by = None
-        if file.uploaded_by_id:
-            uploaded_by = db.query(UserModel).filter(UserModel.id == file.uploaded_by_id).first()
-        
-        file_dict = {
-            "id": file.id,
-            "task_id": file.task_id,
-            "period_id": file.period_id,
-            "filename": file.filename,
-            "original_filename": file.original_filename,
-            "file_size": file.file_size,
-            "mime_type": file.mime_type,
-            "description": file.description,
-            "file_date": file.file_date,
-            "is_external_link": file.is_external_link,
-            "external_url": file.external_url,
-            "uploaded_at": file.uploaded_at,
-            "last_accessed_at": file.last_accessed_at,
-            "uploaded_by": uploaded_by
-        }
-        period_files_with_user.append(file_dict)
-    
-    # Get tasks with their files
-    tasks = db.query(TaskModel).filter(TaskModel.period_id == period_id).all()
-    
-    task_files_list = []
-    for task in tasks:
-        task_files = db.query(FileModel).filter(FileModel.task_id == task.id).all()
-        
-        files_with_user = []
-        for file in task_files:
-            uploaded_by = None
-            if file.uploaded_by_id:
-                uploaded_by = db.query(UserModel).filter(UserModel.id == file.uploaded_by_id).first()
-            
-            file_dict = {
-                "id": file.id,
-                "task_id": file.task_id,
-                "period_id": file.period_id,
-                "filename": file.filename,
-                "original_filename": file.original_filename,
-                "file_size": file.file_size,
-                "mime_type": file.mime_type,
-                "description": file.description,
-                "file_date": file.file_date,
-                "is_external_link": file.is_external_link,
-                "external_url": file.external_url,
-                "uploaded_at": file.uploaded_at,
-                "last_accessed_at": file.last_accessed_at,
-                "uploaded_by": uploaded_by
-            }
-            files_with_user.append(file_dict)
-        
-        if files_with_user or True:  # Include tasks even without files
-            task_files_list.append({
-                "id": task.id,
-                "name": task.name,
-                "status": task.status,
-                "files": files_with_user
-            })
-    
-    # Get trial balance files
-    trial_balance_files = []
-    trial_balances = db.query(TrialBalanceModel).filter(
-        TrialBalanceModel.period_id == period_id
-    ).all()
-    
-    for tb in trial_balances:
-        for account in tb.accounts:
-            attachments = db.query(TrialBalanceAttachmentModel).filter(
-                TrialBalanceAttachmentModel.account_id == account.id
-            ).all()
-            
-            for attachment in attachments:
-                trial_balance_files.append({
-                    "id": attachment.id,
-                    "account_id": account.id,
-                    "account_number": account.account_number,
-                    "account_name": account.account_name,
-                    "filename": attachment.filename,
-                    "original_filename": attachment.original_filename,
-                    "file_size": attachment.file_size,
-                    "mime_type": attachment.mime_type,
-                    "description": attachment.description,
-                    "file_date": attachment.file_date,
-                    "uploaded_at": attachment.uploaded_at,
-                    "file_path": attachment.file_path
-                })
-    
-    return {
-        "period": period,
-        "period_files": period_files_with_user,
-        "task_files": task_files_list,
-        "trial_balance_files": trial_balance_files
-    }
+    return _build_file_cabinet_structure(db, period)
+
+
+@router.get("/period/{period_id}/prior", response_model=FileCabinetStructure)
+async def get_prior_period_files(
+    period_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Get file cabinet structure for the previous period."""
+    period = db.query(PeriodModel).filter(PeriodModel.id == period_id).first()
+    if not period:
+        raise HTTPException(status_code=404, detail="Period not found")
+
+    previous_period = _find_previous_period(db, period)
+    if not previous_period:
+        raise HTTPException(status_code=404, detail="No previous period available")
+
+    return _build_file_cabinet_structure(db, previous_period)
 
 
 @router.post("/upload-period", response_model=File, status_code=status.HTTP_201_CREATED)
@@ -546,4 +571,3 @@ async def download_period_zip(
             "Content-Disposition": f"attachment; filename={zip_filename}"
         }
     )
-

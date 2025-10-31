@@ -77,9 +77,11 @@ export default function Layout({ children }: LayoutProps) {
   }, [periods, selectedPeriodId, setPeriod])
 
   const { data: reviewCount } = useQuery({
-    queryKey: ['review-count'],
+    queryKey: ['review-count', selectedPeriodId],
     queryFn: async () => {
-      const response = await api.get('/api/dashboard/my-reviews')
+      const response = await api.get('/api/dashboard/my-reviews', {
+        params: selectedPeriodId ? { period_id: selectedPeriodId } : undefined,
+      })
       return response.data.total_pending as number
     },
     refetchInterval: 60000, // Refresh every minute
@@ -219,4 +221,3 @@ export default function Layout({ children }: LayoutProps) {
     </div>
   )
 }
-

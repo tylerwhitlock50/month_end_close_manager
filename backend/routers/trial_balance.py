@@ -5,7 +5,7 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import (
     APIRouter,
@@ -39,9 +39,12 @@ from backend.schemas import (
     TrialBalanceAccountTasksUpdate,
     TrialBalanceAttachment,
     TrialBalanceAttachmentLink,
-    TrialBalanceValidation
+    TrialBalanceValidation,
+    TrialBalanceComparison,
+    TrialBalanceComparisonAccount,
 )
 from backend.services.trial_balance_linker import auto_link_tasks_to_trial_balance_accounts
+from backend.services.netsuite_parser import parse_netsuite_trial_balance
 
 
 router = APIRouter(prefix="/api/trial-balance", tags=["trial-balance"])
@@ -168,6 +171,76 @@ def _compute_validation_metrics(account: TrialBalanceAccountModel, supporting_am
     return account_balance, difference, matches
 
 
+def _get_previous_period(db: Session, period: PeriodModel) -> Optional[PeriodModel]:
+    """Locate the most recent prior period with the same close type."""
+
+    prev_month = period.month - 1
+    prev_year = period.year
+    if prev_month <= 0:
+        prev_month = 12
+        prev_year -= 1
+
+    candidate = (
+        db.query(PeriodModel)
+        .filter(
+            PeriodModel.close_type == period.close_type,
+            PeriodModel.year == prev_year,
+            PeriodModel.month == prev_month,
+        )
+        .order_by(PeriodModel.id.desc())
+        .first()
+    )
+
+    if candidate:
+        return candidate
+
+    # Fallback: find the immediately preceding period chronologically
+    return (
+        db.query(PeriodModel)
+        .filter(PeriodModel.close_type == period.close_type)
+        .filter(
+            (PeriodModel.year < period.year)
+            | ((PeriodModel.year == period.year) & (PeriodModel.month < period.month))
+        )
+        .order_by(PeriodModel.year.desc(), PeriodModel.month.desc())
+        .first()
+    )
+
+
+def _format_notes_from_metadata(metadata: dict, warnings: list[str]) -> Optional[str]:
+    parts: list[str] = []
+
+    entity = metadata.get("entity")
+    if entity:
+        parts.append(f"Entity: {entity}")
+
+    label = metadata.get("period_label")
+    if label:
+        parts.append(f"Label: {label}")
+
+    generated_at = metadata.get("generated_at")
+    if generated_at:
+        parts.append(f"Generated: {generated_at}")
+
+    if warnings:
+        joined = "; ".join(warnings)
+        parts.append(f"Warnings: {joined}")
+
+    if not parts:
+        return None
+
+    return " | ".join(parts)
+
+
+def _get_latest_trial_balance(db: Session, period_id: int) -> Optional[TrialBalanceModel]:
+    return (
+        db.query(TrialBalanceModel)
+        .filter(TrialBalanceModel.period_id == period_id)
+        .order_by(TrialBalanceModel.uploaded_at.desc())
+        .first()
+    )
+
+
 @router.get("/template")
 async def download_trial_balance_template(
     current_user: UserModel = Depends(get_current_user)
@@ -180,6 +253,31 @@ async def download_trial_balance_template(
         media_type="text/csv",
         filename="trial_balance_template.csv"
     )
+
+
+@router.get("/period/{period_id}", response_model=List[TrialBalance])
+async def list_trial_balances(
+    period_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Return all trial balance imports for a given period."""
+    period_exists = db.query(PeriodModel.id).filter(PeriodModel.id == period_id).first()
+    if not period_exists:
+        raise HTTPException(status_code=404, detail="Period not found")
+
+    trial_balances = (
+        db.query(TrialBalanceModel)
+        .options(selectinload(TrialBalanceModel.accounts))
+        .filter(TrialBalanceModel.period_id == period_id)
+        .order_by(TrialBalanceModel.uploaded_at.desc())
+        .all()
+    )
+
+    if not trial_balances:
+        return []
+
+    return trial_balances
 
 
 @router.post("/{period_id}/import", response_model=TrialBalanceSummary, status_code=status.HTTP_201_CREATED)
@@ -328,7 +426,196 @@ async def import_trial_balance(
         account_count=account_count,
         total_debit=float(trial_balance.total_debit) if trial_balance.total_debit is not None else None,
         total_credit=float(trial_balance.total_credit) if trial_balance.total_credit is not None else None,
-        total_balance=float(trial_balance.total_balance) if trial_balance.total_balance is not None else None
+        total_balance=float(trial_balance.total_balance) if trial_balance.total_balance is not None else None,
+        metadata=None,
+        warnings=[],
+    )
+
+
+@router.post("/{period_id}/import-netsuite", response_model=TrialBalanceSummary, status_code=status.HTTP_201_CREATED)
+async def import_trial_balance_netsuite(
+    period_id: int,
+    replace_existing: bool = False,
+    file: UploadFile = FastAPIFile(...),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    period = db.query(PeriodModel).filter(PeriodModel.id == period_id).first()
+    if not period:
+        raise HTTPException(status_code=404, detail="Period not found")
+
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    try:
+        decoded = raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        decoded = raw_bytes.decode("latin-1")
+
+    try:
+        parsed = parse_netsuite_trial_balance(decoded)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not parsed.accounts:
+        raise HTTPException(status_code=400, detail="No account rows detected in the NetSuite export")
+
+    if replace_existing:
+        existing = db.query(TrialBalanceModel).filter(TrialBalanceModel.period_id == period_id).all()
+        for tb in existing:
+            db.delete(tb)
+        db.commit()
+
+    trial_balance = TrialBalanceModel(
+        period_id=period_id,
+        name=f"{period.name} NetSuite Trial Balance",
+        source_filename=file.filename or "netsuite_trial_balance.csv",
+        stored_filename="",
+        file_path="",
+        uploaded_by_id=current_user.id,
+        total_debit=parsed.total_debit,
+        total_credit=parsed.total_credit,
+        total_balance=parsed.total_balance,
+        notes=_format_notes_from_metadata(parsed.metadata, parsed.warnings),
+    )
+    db.add(trial_balance)
+    db.flush()
+
+    stored_filename, file_path = _store_import_file(
+        trial_balance.id,
+        file.filename or "netsuite_trial_balance.csv",
+        raw_bytes,
+    )
+    trial_balance.stored_filename = stored_filename
+    trial_balance.file_path = file_path
+
+    account_models: list[TrialBalanceAccountModel] = []
+
+    for account in parsed.accounts:
+        account_model = TrialBalanceAccountModel(
+            trial_balance_id=trial_balance.id,
+            account_number=account.account_number,
+            account_name=account.account_name,
+            account_type=account.account_type,
+            debit=account.debit,
+            credit=account.credit,
+            ending_balance=account.ending_balance,
+        )
+        db.add(account_model)
+        account_models.append(account_model)
+
+    db.flush()
+
+    auto_link_tasks_to_trial_balance_accounts(
+        db,
+        period_id=period_id,
+        trial_balance_id=trial_balance.id,
+        accounts=account_models,
+    )
+
+    db.commit()
+    db.refresh(trial_balance)
+
+    account_count = (
+        db.query(TrialBalanceAccountModel)
+        .filter(TrialBalanceAccountModel.trial_balance_id == trial_balance.id)
+        .count()
+    )
+
+    return TrialBalanceSummary(
+        trial_balance_id=trial_balance.id,
+        period_id=period_id,
+        account_count=account_count,
+        total_debit=float(trial_balance.total_debit) if trial_balance.total_debit is not None else None,
+        total_credit=float(trial_balance.total_credit) if trial_balance.total_credit is not None else None,
+        total_balance=float(trial_balance.total_balance) if trial_balance.total_balance is not None else None,
+        metadata=parsed.metadata,
+        warnings=parsed.warnings,
+    )
+
+
+@router.get("/{period_id}/comparison", response_model=TrialBalanceComparison)
+async def get_trial_balance_comparison(
+    period_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    period = db.query(PeriodModel).filter(PeriodModel.id == period_id).first()
+    if not period:
+        raise HTTPException(status_code=404, detail="Period not found")
+
+    current_tb = _get_latest_trial_balance(db, period_id)
+    if not current_tb:
+        return TrialBalanceComparison(period_id=period_id, previous_period_id=None, accounts=[])
+
+    current_accounts = (
+        db.query(TrialBalanceAccountModel)
+        .filter(TrialBalanceAccountModel.trial_balance_id == current_tb.id)
+        .all()
+    )
+
+    previous_period = _get_previous_period(db, period)
+    previous_tb = (
+        _get_latest_trial_balance(db, previous_period.id) if previous_period else None
+    )
+
+    previous_accounts = (
+        db.query(TrialBalanceAccountModel)
+        .filter(TrialBalanceAccountModel.trial_balance_id == previous_tb.id)
+        .all()
+        if previous_tb
+        else []
+    )
+
+    previous_map = {account.account_number: account for account in previous_accounts}
+    current_map = {account.account_number: account for account in current_accounts}
+
+    account_numbers = sorted(set(current_map.keys()) | set(previous_map.keys()))
+
+    comparison_accounts: list[TrialBalanceComparisonAccount] = []
+
+    for account_number in account_numbers:
+        current_account = current_map.get(account_number)
+        previous_account = previous_map.get(account_number)
+
+        current_balance = (
+            float(current_account.ending_balance)
+            if current_account and current_account.ending_balance is not None
+            else None
+        )
+        previous_balance = (
+            float(previous_account.ending_balance)
+            if previous_account and previous_account.ending_balance is not None
+            else None
+        )
+
+        delta = None
+        delta_percent = None
+        if current_balance is not None or previous_balance is not None:
+            current_value = current_balance or 0.0
+            previous_value = previous_balance or 0.0
+            delta = current_value - previous_value
+            if previous_balance and previous_balance != 0:
+                delta_percent = (delta / previous_balance) * 100
+
+        comparison_accounts.append(
+            TrialBalanceComparisonAccount(
+                account_number=account_number,
+                account_name=(current_account or previous_account).account_name if (current_account or previous_account) else account_number,
+                current_account_id=current_account.id if current_account else None,
+                previous_account_id=previous_account.id if previous_account else None,
+                current_balance=current_balance,
+                previous_balance=previous_balance,
+                delta=delta,
+                delta_percent=delta_percent,
+            )
+        )
+
+    return TrialBalanceComparison(
+        period_id=period_id,
+        previous_period_id=previous_period.id if previous_period else None,
+        accounts=comparison_accounts,
     )
 
 

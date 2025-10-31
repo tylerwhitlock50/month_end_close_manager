@@ -1,3 +1,5 @@
+from typing import Dict, List, Tuple
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
@@ -13,9 +15,17 @@ from backend.models import (
     PeriodStatus,
     Approval as ApprovalModel,
     ApprovalStatus,
-    File as FileModel
+    File as FileModel,
+    task_dependencies
 )
-from backend.schemas import DashboardStats, TaskSummary, MyReviewsResponse, ReviewTask, ReviewApproval
+from backend.schemas import (
+    DashboardStats,
+    TaskSummary,
+    MyReviewsResponse,
+    ReviewTask,
+    ReviewApproval,
+    CriticalPathItem,
+)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -96,6 +106,78 @@ async def get_dashboard_stats(
     review_tasks.sort(key=lambda item: item.due_date or datetime.max)
     at_risk_tasks.sort(key=lambda item: item.due_date or datetime.max)
 
+    critical_path_items: List[CriticalPathItem] = []
+    task_ids = [task.id for task in tasks]
+
+    if task_ids:
+        dependency_rows = (
+            db.query(
+                task_dependencies.c.depends_on_id.label("blocker_id"),
+                TaskModel.id.label("dependent_id"),
+                TaskModel.name.label("dependent_name"),
+                TaskModel.status.label("dependent_status"),
+                TaskModel.due_date.label("dependent_due"),
+            )
+            .join(TaskModel, TaskModel.id == task_dependencies.c.task_id)
+            .filter(task_dependencies.c.depends_on_id.in_(task_ids))
+            .filter(TaskModel.id.in_(task_ids))
+            .all()
+        )
+
+        dependents_by_blocker: Dict[int, List[TaskSummary]] = {}
+
+        for row in dependency_rows:
+            dependent_status = row.dependent_status
+            if dependent_status == TaskStatus.COMPLETE:
+                continue
+
+            dependents_by_blocker.setdefault(row.blocker_id, []).append(
+                TaskSummary(
+                    id=row.dependent_id,
+                    name=row.dependent_name,
+                    status=dependent_status,
+                    due_date=row.dependent_due,
+                )
+            )
+
+        if dependents_by_blocker:
+            now = datetime.utcnow()
+            candidates: List[Tuple[TaskModel, List[TaskSummary], int, int]] = []
+
+            for task in tasks:
+                dependents = dependents_by_blocker.get(task.id)
+                if not dependents:
+                    continue
+
+                if task.status == TaskStatus.COMPLETE:
+                    continue
+
+                dependents.sort(key=lambda item: item.due_date or datetime.max)
+                blocked_count = len(dependents)
+                overdue_flag = 0 if task.due_date and task.due_date < now else 1
+
+                candidates.append((task, dependents, blocked_count, overdue_flag))
+
+            candidates.sort(
+                key=lambda item: (
+                    item[3],
+                    item[0].due_date or datetime.max,
+                    -item[2],
+                )
+            )
+
+            critical_path_items = [
+                CriticalPathItem(
+                    id=task.id,
+                    name=task.name,
+                    status=task.status,
+                    due_date=task.due_date,
+                    blocked_dependents=blocked_count,
+                    dependents=dependents,
+                )
+                for task, dependents, blocked_count, _ in candidates[:5]
+            ]
+
     return DashboardStats(
         total_tasks=total_tasks,
         completed_tasks=completed_tasks,
@@ -106,7 +188,8 @@ async def get_dashboard_stats(
         avg_time_to_complete=round(avg_time_to_complete, 2) if avg_time_to_complete else None,
         blocked_tasks=blocked_tasks[:5],
         review_tasks=review_tasks[:5],
-        at_risk_tasks=at_risk_tasks[:5]
+        at_risk_tasks=at_risk_tasks[:5],
+        critical_path_tasks=critical_path_items,
     )
 
 
@@ -209,4 +292,3 @@ async def get_my_reviews(
         total_pending=total_pending,
         overdue_count=overdue_count
     )
-

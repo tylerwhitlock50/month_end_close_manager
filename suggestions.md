@@ -477,10 +477,10 @@ POST /api/trial-balance/import-netsuite
 **Impact:** Immediate workflow improvement
 
 ### Phase 2: Core Features (Weeks 2-3)
-- ⏳ #9: Comment feed (3-4 hours)
-- ⏳ #4: Bottleneck dashboard (2-3 hours)
+- ✅ #9: Comment feed (3-4 hours)
+- ✅ #4: Bottleneck dashboard (2-3 hours)
 - ✅ #3: Bulk task actions (3-4 hours)
-- ⏳ #15: My Reviews queue (3-4 hours)
+- ✅ #15: My Reviews queue (3-4 hours)
 
 **Total Effort:** ~15 hours  
 **Impact:** Major workflow enhancement
@@ -585,7 +585,7 @@ For teams looking for immediate value, prioritize these:
 
 ---
 
-*Last updated: {{DATE}}*
+*Last updated: 2025-10-31*
 *Status: Active planning document*
 ### 21. Variance / Flux Analysis Workflow
 **Problem:** Controllers need to explain material trial balance swings each period, but the app lacks a structured way to surface MoM/YoY/budget variances and capture explanations.

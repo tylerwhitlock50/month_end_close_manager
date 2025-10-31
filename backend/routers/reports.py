@@ -76,6 +76,7 @@ async def get_task_report(
 
 
 @router.get("/periods", response_model=List[PeriodMetrics])
+@router.get("/period-metrics", response_model=List[PeriodMetrics])
 async def get_period_metrics(
     year: int = None,
     db: Session = Depends(get_db),

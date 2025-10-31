@@ -4,8 +4,13 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.auth import get_current_user
-from backend.models import Comment as CommentModel, Task as TaskModel, User as UserModel
-from backend.schemas import Comment, CommentCreate, CommentWithUser
+from backend.models import (
+    Comment as CommentModel,
+    Task as TaskModel,
+    User as UserModel,
+    AuditLog as AuditLogModel,
+)
+from backend.schemas import Comment, CommentCreate, CommentUpdate, CommentWithUser
 
 router = APIRouter(prefix="/api/comments", tags=["comments"])
 
@@ -56,10 +61,51 @@ async def create_comment(
     )
     
     db.add(db_comment)
+    db.flush()
+
+    audit_log = AuditLogModel(
+        task_id=comment_data.task_id,
+        user_id=current_user.id,
+        action="comment_added",
+        entity_type="comment",
+        entity_id=db_comment.id,
+        details=comment_data.content[:500]
+    )
+    db.add(audit_log)
+
     db.commit()
     db.refresh(db_comment)
-    
+
     return db_comment
+
+
+@router.put("/{comment_id}", response_model=Comment)
+async def update_comment(
+    comment_id: int,
+    update_data: CommentUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Update an existing comment. Only the author can edit."""
+    comment = db.query(CommentModel).filter(CommentModel.id == comment_id).first()
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+    if comment.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only edit your own comments"
+        )
+
+    if update_data.content is not None:
+        comment.content = update_data.content
+    if update_data.is_internal is not None:
+        comment.is_internal = update_data.is_internal
+
+    db.commit()
+    db.refresh(comment)
+
+    return comment
 
 
 @router.delete("/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)

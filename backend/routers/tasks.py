@@ -28,7 +28,11 @@ from backend.schemas import (
     TaskBulkUpdateRequest,
     TaskBulkUpdateResult,
     AuditLogWithUser,
-    TaskActivityEvent
+    TaskActivityEvent,
+    TaskActivityFeed,
+    PriorTaskSnapshot,
+    TaskFileSummary,
+    TaskCommentSummary,
 )
 from backend.services.trial_balance_linker import auto_link_tasks_to_trial_balance_accounts
 from backend.services.notifications import NotificationService
@@ -59,6 +63,63 @@ def log_task_change(db: Session, task: TaskModel, user: UserModel, action: str, 
         new_value=new_value
     )
     db.add(audit_log)
+
+
+def _get_previous_period(db: Session, period: PeriodModel) -> Optional[PeriodModel]:
+    prev_month = period.month - 1
+    prev_year = period.year
+    if prev_month <= 0:
+        prev_month = 12
+        prev_year -= 1
+
+    candidate = (
+        db.query(PeriodModel)
+        .filter(
+            PeriodModel.close_type == period.close_type,
+            PeriodModel.year == prev_year,
+            PeriodModel.month == prev_month,
+        )
+        .order_by(PeriodModel.id.desc())
+        .first()
+    )
+    if candidate:
+        return candidate
+
+    return (
+        db.query(PeriodModel)
+        .filter(PeriodModel.close_type == period.close_type)
+        .filter(
+            (PeriodModel.year < period.year)
+            | ((PeriodModel.year == period.year) & (PeriodModel.month < period.month))
+        )
+        .order_by(PeriodModel.year.desc(), PeriodModel.month.desc())
+        .first()
+    )
+
+
+def _map_file_to_summary(db: Session, file: FileModel) -> TaskFileSummary:
+    uploaded_by = file.uploaded_by if hasattr(file, "uploaded_by") else None
+    if uploaded_by is None and file.uploaded_by_id:
+        uploaded_by = db.query(UserModel).filter(UserModel.id == file.uploaded_by_id).first()
+
+    return TaskFileSummary(
+        id=file.id,
+        filename=file.filename,
+        original_filename=file.original_filename,
+        file_size=file.file_size,
+        mime_type=file.mime_type,
+        uploaded_at=file.uploaded_at,
+        uploaded_by=uploaded_by,
+    )
+
+
+def _map_comment_to_summary(comment: CommentModel) -> TaskCommentSummary:
+    return TaskCommentSummary(
+        id=comment.id,
+        content=comment.content,
+        created_at=comment.created_at,
+        user=comment.user,
+    )
 
 
 @router.get("/", response_model=List[TaskWithRelations])
@@ -282,9 +343,11 @@ async def get_task_audit_logs(
     return logs
 
 
-@router.get("/{task_id}/activity", response_model=List[TaskActivityEvent])
+@router.get("/{task_id}/activity", response_model=TaskActivityFeed)
 async def get_task_activity(
     task_id: int,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
@@ -372,7 +435,89 @@ async def get_task_activity(
 
     events.sort(key=lambda event: event.created_at, reverse=True)
 
-    return events
+    total_events = len(events)
+    start = min(offset, total_events)
+    end = min(start + limit, total_events)
+    sliced = events[start:end]
+
+    return TaskActivityFeed(
+        total=total_events,
+        limit=limit,
+        offset=offset,
+        events=sliced,
+    )
+
+
+@router.get("/{task_id}/prior", response_model=PriorTaskSnapshot)
+async def get_prior_task_snapshot(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    period = db.query(PeriodModel).filter(PeriodModel.id == task.period_id).first()
+    if not period:
+        raise HTTPException(status_code=404, detail="Period not found")
+
+    previous_period = _get_previous_period(db, period)
+    if not previous_period:
+        raise HTTPException(status_code=404, detail="Previous period not found")
+
+    candidate_query = db.query(TaskModel).filter(TaskModel.period_id == previous_period.id)
+    candidate = None
+
+    if task.template_id:
+        candidate = (
+            candidate_query
+            .filter(TaskModel.template_id == task.template_id)
+            .order_by(TaskModel.id.desc())
+            .first()
+        )
+
+    if not candidate:
+        candidate = (
+            candidate_query
+            .filter(TaskModel.name == task.name)
+            .order_by(TaskModel.id.desc())
+            .first()
+        )
+
+    if not candidate:
+        raise HTTPException(status_code=404, detail="No matching task in previous period")
+
+    files = (
+        db.query(FileModel)
+        .options(selectinload(FileModel.uploaded_by))
+        .filter(FileModel.task_id == candidate.id)
+        .order_by(FileModel.uploaded_at.desc())
+        .all()
+    )
+
+    comments = (
+        db.query(CommentModel)
+        .options(selectinload(CommentModel.user))
+        .filter(CommentModel.task_id == candidate.id)
+        .order_by(CommentModel.created_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    file_summaries = [_map_file_to_summary(db, file) for file in files]
+    comment_summaries = [_map_comment_to_summary(comment) for comment in comments]
+
+    return PriorTaskSnapshot(
+        task_id=candidate.id,
+        period_id=previous_period.id,
+        period_name=previous_period.name,
+        name=candidate.name,
+        status=candidate.status,
+        due_date=candidate.due_date,
+        files=file_summaries,
+        comments=comment_summaries,
+    )
 
 
 @router.post("/", response_model=Task, status_code=status.HTTP_201_CREATED)
@@ -553,14 +698,28 @@ async def update_task(
     
     # Update dependencies if provided
     if task_update.dependency_ids is not None:
-        # Clear existing dependencies
+        existing_dependency_ids = sorted(dep.id for dep in task.dependencies)
+
         task.dependencies = []
-        
-        # Add new dependencies
+        new_dependency_ids: List[int] = []
+
         for dep_id in task_update.dependency_ids:
             dep_task = db.query(TaskModel).filter(TaskModel.id == dep_id).first()
             if dep_task:
                 task.dependencies.append(dep_task)
+                new_dependency_ids.append(dep_task.id)
+
+        new_dependency_ids.sort()
+
+        if existing_dependency_ids != new_dependency_ids:
+            log_task_change(
+                db,
+                task,
+                current_user,
+                "dependencies_updated",
+                str(existing_dependency_ids),
+                str(new_dependency_ids),
+            )
 
     if (
         task_update.assignee_id is not None

@@ -140,6 +140,11 @@ npm run dev
    - Add Slack token for Slack notifications
    - Restart services: `docker-compose restart`
 
+5. **Import your trial balance**
+   - Go to **Trial Balance** and select either *Standard CSV* or *NetSuite Export*
+   - Upload the current period file; the summary panel will confirm totals and metadata
+   - Review the "What's New" banner and the prior-period comparison columns to spot variances immediately
+
 ## Troubleshooting
 
 ### Port already in use

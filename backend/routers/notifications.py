@@ -32,7 +32,17 @@ async def list_notifications(
     return notifications
 
 
+@router.get("/me", response_model=List[Notification])
+async def get_my_notifications(
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Convenience endpoint for the current user's notifications."""
+    return await list_notifications(unread_only=False, limit=20, db=db, current_user=current_user)
+
+
 @router.post("/{notification_id}/read", response_model=Notification)
+@router.put("/{notification_id}/read", response_model=Notification)
 async def mark_notification_read(
     notification_id: int,
     db: Session = Depends(get_db),
@@ -71,4 +81,3 @@ async def mark_all_notifications_read(
     )
     db.commit()
     return updated
-

@@ -5,11 +5,11 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
-  TrendingUp,
   Calendar,
   Users,
   AlertTriangle,
-  PauseCircle
+  PauseCircle,
+  Activity,
 } from 'lucide-react'
 import api from '../lib/api'
 import { formatDate } from '../lib/utils'
@@ -25,6 +25,7 @@ interface DashboardStats {
   blocked_tasks: TaskSummary[]
   review_tasks: TaskSummary[]
   at_risk_tasks: TaskSummary[]
+  critical_path_tasks: CriticalPathTask[]
 }
 
 interface TaskSummary {
@@ -32,6 +33,11 @@ interface TaskSummary {
   name: string
   status: string
   due_date?: string
+}
+
+interface CriticalPathTask extends TaskSummary {
+  blocked_dependents: number
+  dependents: TaskSummary[]
 }
 
 export default function Dashboard() {
@@ -130,7 +136,7 @@ export default function Dashboard() {
       )}
 
       {stats && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <WorkflowColumn
             title="Blocked Tasks"
             icon={PauseCircle}
@@ -152,6 +158,7 @@ export default function Dashboard() {
             emptyMessage="No upcoming risks."
             link="/tasks?status=in_progress"
           />
+          <CriticalPathColumn tasks={stats.critical_path_tasks} />
         </div>
       )}
 
@@ -254,6 +261,61 @@ function WorkflowColumn({ title, icon: Icon, tasks, emptyMessage, link }: Workfl
           ))
         )}
       </div>
+    </div>
+  )
+}
+
+interface CriticalPathColumnProps {
+  tasks: CriticalPathTask[]
+}
+
+function CriticalPathColumn({ tasks }: CriticalPathColumnProps) {
+  return (
+    <div className="card h-full">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+          <Activity className="w-4 h-4 text-primary-600" />
+          Critical Path
+        </h3>
+        <Link to="/tasks" className="text-xs text-primary-600 hover:text-primary-700">
+          View tasks →
+        </Link>
+      </div>
+      {tasks.length === 0 ? (
+        <p className="text-sm text-gray-500">No blockers detected.</p>
+      ) : (
+        <div className="space-y-3">
+          {tasks.map((task) => (
+            <div key={task.id} className="p-3 rounded-lg border border-amber-200 bg-amber-50">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-gray-900 line-clamp-2">{task.name}</p>
+                <span className="badge badge-yellow">{task.blocked_dependents} waiting</span>
+              </div>
+              {task.due_date && (
+                <p className="text-xs text-gray-600 mt-1">Due {formatDate(task.due_date)}</p>
+              )}
+              {task.dependents.length > 0 && (
+                <div className="mt-2 text-xs text-gray-600">
+                  <p className="font-semibold text-gray-700">Unblocks:</p>
+                  <ul className="mt-1 space-y-1">
+                    {task.dependents.slice(0, 3).map((dependent) => (
+                      <li key={dependent.id} className="flex items-center justify-between">
+                        <span className="truncate mr-2">{dependent.name}</span>
+                        {dependent.due_date && (
+                          <span className="text-[11px] text-gray-500">{formatDate(dependent.due_date)}</span>
+                        )}
+                      </li>
+                    ))}
+                    {task.dependents.length > 3 && (
+                      <li className="text-[11px] text-gray-500">+{task.dependents.length - 3} more</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

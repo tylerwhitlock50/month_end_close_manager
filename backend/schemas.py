@@ -31,7 +31,7 @@ class UserUpdate(BaseModel):
 class User(UserBase):
     id: int
     is_active: bool
-    created_at: datetime
+    created_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
@@ -188,6 +188,18 @@ class TaskSummary(BaseModel):
         from_attributes = True
 
 
+class CriticalPathItem(BaseModel):
+    id: int
+    name: str
+    status: TaskStatus
+    due_date: Optional[datetime] = None
+    blocked_dependents: int = 0
+    dependents: List[TaskSummary] = []
+
+    class Config:
+        from_attributes = True
+
+
 # File Schemas
 class FileBase(BaseModel):
     description: Optional[str] = None
@@ -263,6 +275,11 @@ class CommentCreate(CommentBase):
     task_id: int
 
 
+class CommentUpdate(BaseModel):
+    content: Optional[str] = None
+    is_internal: Optional[bool] = None
+
+
 class Comment(CommentBase):
     id: int
     task_id: int
@@ -304,8 +321,15 @@ class TaskActivityEvent(BaseModel):
     event_type: str
     message: str
     created_at: datetime
-    user: User
+    user: Optional[User]
     metadata: Optional[Dict[str, Any]] = None
+
+
+class TaskActivityFeed(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    events: List[TaskActivityEvent]
 
 
 class TaskBulkUpdateRequest(BaseModel):
@@ -361,6 +385,7 @@ class DashboardStats(BaseModel):
     blocked_tasks: List[TaskSummary] = []
     review_tasks: List[TaskSummary] = []
     at_risk_tasks: List[TaskSummary] = []
+    critical_path_tasks: List[CriticalPathItem] = []
 
 
 class PeriodProgress(BaseModel):
@@ -571,6 +596,53 @@ class TrialBalanceSummary(BaseModel):
     total_debit: Optional[float] = None
     total_credit: Optional[float] = None
     total_balance: Optional[float] = None
+    metadata: Optional[dict[str, Optional[str]]] = None
+    warnings: List[str] = []
+
+
+class TrialBalanceComparisonAccount(BaseModel):
+    account_number: str
+    account_name: Optional[str] = None
+    current_account_id: Optional[int] = None
+    previous_account_id: Optional[int] = None
+    current_balance: Optional[float] = None
+    previous_balance: Optional[float] = None
+    delta: Optional[float] = None
+    delta_percent: Optional[float] = None
+
+
+class TrialBalanceComparison(BaseModel):
+    period_id: int
+    previous_period_id: Optional[int]
+    accounts: List[TrialBalanceComparisonAccount] = []
+
+
+class TaskFileSummary(BaseModel):
+    id: int
+    filename: str
+    original_filename: str
+    file_size: int
+    mime_type: Optional[str] = None
+    uploaded_at: datetime
+    uploaded_by: Optional[User] = None
+
+
+class TaskCommentSummary(BaseModel):
+    id: int
+    content: str
+    created_at: datetime
+    user: Optional[User]
+
+
+class PriorTaskSnapshot(BaseModel):
+    task_id: int
+    period_id: int
+    period_name: str
+    name: str
+    status: TaskStatus
+    due_date: Optional[datetime]
+    files: List[TaskFileSummary] = []
+    comments: List[TaskCommentSummary] = []
 
 
 # File Cabinet Schemas

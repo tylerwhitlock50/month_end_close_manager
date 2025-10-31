@@ -158,6 +158,12 @@ npm run dev
 3. Filter by period or department
 4. Click **New Task** to create a task manually
 5. Drag tasks between columns in Board View to change status
+
+### Trial Balance Imports & Comparisons
+
+- Open **Trial Balance** and choose between **Standard CSV** and the new **NetSuite Export** mode. NetSuite mode parses the native NetSuite trial balance export (no manual column mapping required) and stores import metadata for review.
+- After an import, the page surfaces a **What's New This Period** banner highlighting new accounts, items without linked tasks, and entries still awaiting verification.
+- The accounts grid now shows **prior-period balances and deltas**. Click **Manage** on any row to see the previous period's files and comments directly inside the task modal for quick comparisons.
 6. Click on a task to view details, add files, or request approvals
 
 ### Uploading Files
@@ -314,9 +320,171 @@ certbot --nginx -d your-domain.com
 
 ## 🧪 Testing
 
-Run backend tests:
+This project includes comprehensive API tests using PyTest to ensure all endpoints work correctly and return the expected data types.
+
+### Test Structure
+
+```
+backend/tests/
+├── conftest.py                    # Shared fixtures and test configuration
+├── test_auth.py                   # Authentication endpoint tests
+├── test_users.py                  # User management tests
+├── test_periods.py                # Period management tests
+├── test_tasks.py                  # Task management tests
+├── test_files.py                  # File upload/download tests
+├── test_dashboard.py              # Dashboard endpoint tests
+├── test_remaining_routers.py      # Tests for approvals, comments, etc.
+└── test_task_activity.py          # Existing task activity tests
+```
+
+### Running Tests
+
+#### Quick Start (Docker - Recommended)
+
 ```bash
+# Windows
+run_tests.bat
+
+# Linux/Mac
+./run_tests.sh --docker
+
+# With coverage report
+./run_tests.sh --docker --coverage
+
+# Run specific test file
+./run_tests.sh --docker --file backend/tests/test_auth.py
+
+# Verbose output
+./run_tests.sh --docker --verbose
+```
+
+#### Manual Docker Commands
+
+```bash
+# Start containers if not running
+docker-compose up -d
+
+# Run all tests
+docker-compose exec backend pytest
+
+# Run with coverage
+docker-compose exec backend pytest --cov=backend --cov-report=term-missing
+
+# Run specific test file
+docker-compose exec backend pytest backend/tests/test_auth.py -v
+
+# Run specific test class
+docker-compose exec backend pytest backend/tests/test_users.py::TestGetUsers -v
+
+# Run specific test method
+docker-compose exec backend pytest backend/tests/test_auth.py::TestAuthLogin::test_login_success -v
+```
+
+#### Local Testing (Without Docker)
+
+```bash
+# Activate virtual environment
+venv\Scripts\activate  # Windows
+# source venv/bin/activate  # Linux/Mac
+
+# Run all tests
 pytest
+
+# Run with coverage
+pytest --cov=backend --cov-report=html
+
+# Run specific tests
+pytest backend/tests/test_auth.py -v
+```
+
+### Test Coverage
+
+The test suite covers:
+
+- ✅ **Authentication**: Login, registration, token validation
+- ✅ **User Management**: CRUD operations, role-based access
+- ✅ **Period Management**: Creation, updates, progress tracking
+- ✅ **Task Management**: CRUD, bulk updates, dependencies, activity logs
+- ✅ **File Management**: Upload, download, external links
+- ✅ **Dashboard**: Statistics, review queues
+- ✅ **Approvals**: Request, approve/reject workflow
+- ✅ **Comments**: Add, update, delete comments
+- ✅ **Notifications**: Create, mark as read
+- ✅ **Task Templates**: Template management
+- ✅ **Reports**: Task reports, period metrics
+
+Target coverage: **80%+** for all routers
+
+### Viewing Coverage Reports
+
+After running tests with coverage:
+
+```bash
+# Coverage report is generated in backend/tests/coverage_html/
+# Open in browser:
+
+# Windows
+start backend/tests/coverage_html/index.html
+
+# Mac
+open backend/tests/coverage_html/index.html
+
+# Linux
+xdg-open backend/tests/coverage_html/index.html
+```
+
+### API Documentation
+
+For detailed endpoint documentation including:
+- Expected request types (GET, POST, PUT, DELETE)
+- Request body schemas
+- Response formats
+- Error codes
+- Example requests/responses
+
+See: **[API_TESTING_GUIDE.md](./API_TESTING_GUIDE.md)**
+
+### Common Issues
+
+**Issue**: Tests fail with "no such table" error
+```bash
+# Solution: Ensure database is initialized
+docker-compose exec backend python init_db.py
+```
+
+**Issue**: Import errors
+```bash
+# Solution: Install test dependencies
+pip install -r requirements.txt
+```
+
+**Issue**: Container not running
+```bash
+# Solution: Start containers
+docker-compose up -d
+# Wait for services to be ready (check with docker-compose ps)
+```
+
+### Writing New Tests
+
+When adding new endpoints or modifying existing ones:
+
+1. Add tests to the appropriate test file
+2. Use fixtures from `conftest.py` for database setup
+3. Verify both success and error cases
+4. Check response structure and data types
+5. Run linter: `pytest --pylint`
+
+Example test:
+```python
+def test_get_user_success(client: TestClient, sample_user: UserModel):
+    """Should return specific user by ID"""
+    response = client.get(f"/api/users/{sample_user.id}")
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == sample_user.id
+    assert data["email"] == sample_user.email
 ```
 
 ## 📝 License

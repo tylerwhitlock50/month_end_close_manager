@@ -43,6 +43,19 @@ async def create_task_template(
     return template
 
 
+@router.get("/{template_id}", response_model=TaskTemplate)
+async def get_task_template(
+    template_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Fetch a task template by ID."""
+    template = db.query(TaskTemplateModel).filter(TaskTemplateModel.id == template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Task template not found")
+    return template
+
+
 @router.put("/{template_id}", response_model=TaskTemplate)
 async def update_task_template(
     template_id: int,
@@ -77,4 +90,3 @@ async def delete_task_template(
 
     db.delete(template)
     db.commit()
-

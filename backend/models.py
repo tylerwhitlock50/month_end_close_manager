@@ -207,6 +207,7 @@ class File(Base):
     # Relationships
     task = relationship("Task", back_populates="files")
     period = relationship("Period")
+    uploaded_by = relationship("User")
 
 
 class TrialBalance(Base):
@@ -399,4 +400,3 @@ class Notification(Base):
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     read_at = Column(DateTime(timezone=True), nullable=True)
-

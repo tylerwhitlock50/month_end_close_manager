@@ -2,11 +2,20 @@
 Database initialization script.
 Creates tables and optionally seeds with sample data.
 """
-import sys
-from sqlalchemy.orm import Session
+from datetime import datetime, timedelta
 
 from backend.database import engine, Base, SessionLocal
-from backend.models import User, Period, TaskTemplate, UserRole, CloseType
+from backend.models import (
+    User,
+    Period,
+    TaskTemplate,
+    Task,
+    Comment,
+    UserRole,
+    CloseType,
+    TaskStatus,
+    PeriodStatus,
+)
 from backend.auth import get_password_hash
 
 
@@ -186,7 +195,67 @@ def seed_data():
         
         db.commit()
         print("✓ Created task templates")
-        
+
+        # Create a sample period with linked tasks, dependencies, and timeline activity
+        sample_period = db.query(Period).filter(Period.name == "September 2025").first()
+        if not sample_period:
+            sample_period = Period(
+                name="September 2025",
+                month=9,
+                year=2025,
+                close_type=CloseType.MONTHLY,
+                status=PeriodStatus.IN_PROGRESS,
+                is_active=True,
+                target_close_date=datetime.utcnow().date(),
+            )
+            db.add(sample_period)
+            db.commit()
+            db.refresh(sample_period)
+
+        preparer = db.query(User).filter(User.email == "john.doe@monthend.com").first()
+        reviewer = db.query(User).filter(User.email == "jane.smith@monthend.com").first()
+
+        if preparer and reviewer:
+            existing_task_count = db.query(Task).filter(Task.period_id == sample_period.id).count()
+            if existing_task_count == 0:
+                cash_task = Task(
+                    name="Close cash ledger",
+                    description="Post cash entries and reconcile balances",
+                    period_id=sample_period.id,
+                    owner_id=preparer.id,
+                    assignee_id=preparer.id,
+                    status=TaskStatus.IN_PROGRESS,
+                    due_date=datetime.utcnow() + timedelta(days=2),
+                    department="Accounting",
+                )
+
+                flux_task = Task(
+                    name="Flux variance review",
+                    description="Review material P&L variances and document explanations",
+                    period_id=sample_period.id,
+                    owner_id=reviewer.id,
+                    assignee_id=reviewer.id,
+                    status=TaskStatus.REVIEW,
+                    due_date=datetime.utcnow() + timedelta(days=3),
+                    department="Finance",
+                )
+
+                db.add_all([cash_task, flux_task])
+                db.flush()
+
+                flux_task.dependencies.append(cash_task)
+
+                kickoff_comment = Comment(
+                    task_id=flux_task.id,
+                    user_id=reviewer.id,
+                    content="Ready for review—please double-check the supporting schedules before sign-off.",
+                    is_internal=False,
+                )
+                db.add(kickoff_comment)
+
+                db.commit()
+                print("✓ Seeded sample close tasks with dependencies and timeline activity")
+
         print("\n✅ Database seeding completed successfully!")
         print("\nLogin credentials:")
         print("  Email: admin@monthend.com")
