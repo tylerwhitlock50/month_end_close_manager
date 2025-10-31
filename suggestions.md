@@ -291,6 +291,72 @@ This document contains comprehensive suggestions for improving the Month-End Clo
 
 ---
 
+### 26. Variance / Flux Analysis (Analytics Suite)
+**Problem:** Controllers need fast explanations for material movements between periods, yet the product stops at balance comparisons.
+
+**Solution:**
+- Build a Flux Dashboard fed by trial balance snapshots that surfaces Δ$ and Δ% for each account/entity across MoM, YoY, and budget comparisons.
+- Allow configurable threshold rules (e.g., |Δ%| > 15% or |Δ$| > $10k) to flag items into an "Explain This" queue.
+- Support owner assignment, explanation capture, and evidence attachments directly on variance rows, locking narratives once the period closes.
+- Persist explanations with timestamps/user IDs so next period reviewers see the history in context.
+- Present two primary surfaces: a Flux Queue table (current, prior, Δ$, Δ%, budget Δ, owner, status) and an account detail view with trend sparkline, explanation thread, "Add Evidence" uploader, and status controls.
+
+**Technical Notes:**
+- Extend schema with `account_period_metrics`, `flux_items`, and `flux_explanations` tables; reuse trial balance snapshots for source data.
+- APIs: `GET /api/flux?period_id=…` to list flagged items, `PATCH /api/flux/{id}` for owner/status updates, `POST /api/flux/{id}/explanations` for immutable notes/evidence.
+- Background job `flux_recompute_daily` recalculates variances after new imports; lock explanations when a period transitions to "Closed".
+
+**Success Criteria:** 100% of flagged items carry an explanation before period close, with auditors able to trace prior-period commentary.
+
+**Impact:** Shrinks variance analysis prep time, keeps auditors satisfied, and gives finance leadership visibility into unexplained swings.
+
+**Priority:** High (core analytics differentiator)
+
+---
+
+### 27. Automated Requests & Follow-Ups ("Chaser")
+**Problem:** Preparers chase supporting documents and confirmations manually, creating spreadsheet trackers and ad-hoc reminder threads.
+
+**Solution:**
+- Add a request composer attached to tasks or flux items that sends templated outreach via Email/Slack with smart placeholders (period, due date, links).
+- Track lifecycle states (Sent → Awaiting Response → Completed) and schedule reminder cadences configurable per template.
+- Ingest replies/attachments through inbound email + Slack webhooks, automatically linking artifacts back to the originating task for audit traceability.
+- Provide a Kanban-style Requests board summarizing outstanding asks by recipient, age, and response rate.
+
+**Technical Notes:**
+- Data model additions: `requests` (period, task or flux linkage, channel, cadence, status) and `request_messages` (direction, body, attachments).
+- APIs: `POST /api/requests` to create, `POST /api/requests/{id}/send` for immediate delivery, `PATCH /api/requests/{id}` to modify cadence/recipients/status.
+- Webhooks: `/api/hooks/inbound-email` and `/api/hooks/slack` capture responses; scheduled `requests_nudge_runner` job sends follow-ups until completion.
+
+**Success Criteria:** Improved response rate and average time-to-response; escalation alerts for requests still open after N days.
+
+**Impact:** Automates follow-ups, improves accountability with external contributors, and centralizes evidence collection.
+
+**Priority:** High (workflow automation)
+
+---
+
+### 28. Bottleneck & Workload Analytics
+**Problem:** Managers lack objective insight into slowdowns across Prepare → Review → Approve stages, making reallocations reactive.
+
+**Solution:**
+- Leverage audit logs to calculate cycle times, SLA adherence, and “aging in status” metrics per owner, department, and task stage.
+- Surface heatmaps showing workload concentration, overdue trends, and at-risk tasks, plus a “Critical Path” list of items blocking dependents.
+- Provide throughput charts (tasks completed per day) and predictions on time-to-close based on current velocity.
+
+**Technical Notes:**
+- Utilize existing audit log events; optionally materialize `task_time_slices` for quick duration queries.
+- APIs: `GET /api/analytics/bottlenecks`, `GET /api/analytics/throughput`, `GET /api/analytics/critical-path` driving dashboard tiles and detail drawers.
+- Scheduled `analytics_rollup_hourly` job refreshes aggregates; restrict detailed user-level insights to Admin/Reviewer roles.
+
+**Success Criteria:** Demonstrated reduction in average cycle time and fewer overdue tasks across sequential periods.
+
+**Impact:** Enables proactive staffing adjustments, highlights process bottlenecks, and supports continuous improvement conversations.
+
+**Priority:** Medium-High (operational insight)
+
+---
+
 ## 🎓 User Experience & Onboarding
 
 ### 19. Contextual Tooltips & Inline Glossary
@@ -500,6 +566,38 @@ POST /api/trial-balance/import-netsuite
 
 ---
 
+## 🧭 Optional Add-Ons & Future Enhancements
+
+### 29. ERP Integrations & Sync
+**Vision:** Direct NetSuite (and future ERP) API connectivity for automated trial balance refreshes, reconciliation updates, and real-time status checks without manual exports.
+
+### 30. PBC Workspace for Auditors
+**Vision:** Read-only portal aggregating requests, approvals, and supporting evidence so auditors can self-serve documentation while preserving internal controls.
+
+### 31. AI-Assisted Insights
+**Vision:** Machine learning helpers to propose variance explanations, match documents to tasks, and flag anomalies based on historical close data.
+
+### 32. Multi-Entity Close Management
+**Vision:** Consolidated views across subsidiaries with intercompany eliminations, currency rollups, and entity-specific workflows.
+
+---
+
+## 📈 Metrics & Monitoring
+
+### 33. Close Performance KPIs & Health Checks
+**Problem:** Leadership needs reliable telemetry on close health, but current reporting stops at task counts.
+
+**Solution:**
+- Track and surface KPIs such as Time-to-Close, On-Time % by Department, Average Approval Cycle Time, and Variance Coverage %.
+- Schedule background jobs for flux recomputation, analytics rollups, and reminder dispatch, exposing job status in an admin console.
+- Publish health endpoints (`/api/health`, `/api/analytics/status`) for infrastructure monitoring and alerting.
+
+**Impact:** Gives visibility into process efficiency, supports SLA reporting, and enables proactive ops monitoring.
+
+**Priority:** Medium (enabler for scale)
+
+---
+
 ## 📅 Implementation Roadmap
 
 ### Phase 1: Quick Wins (Week 1)
@@ -569,6 +667,27 @@ POST /api/trial-balance/import-netsuite
 **Total Effort:** ~48 hours  
 **Impact:** Professional polish and advanced capabilities
 
+### Phase 6: Analytics Suite & Automation (Weeks 8-10) **⭐ NEW**
+**Focus:** Deliver decision support and automated outreach for controllers and reviewers.
+
+- 🔲 #26: Variance / Flux Analysis (10-14 hours)
+  - Threshold-driven variance queue
+  - Owner assignment + explanation workflows
+  - Audit-locked commentary
+- 🔲 #27: Automated Requests & Follow-Ups (12-16 hours)
+  - Request composer + templates
+  - Reminder cadences and inbound capture
+  - Requests dashboard metrics
+- 🔲 #28: Bottleneck & Workload Analytics (8-12 hours)
+  - Cycle-time analytics and heatmaps
+  - Critical path insights and SLA tracking
+- 🔲 #33: Close KPIs & Health Monitoring (4-6 hours)
+  - KPI dashboards
+  - Scheduled job status + health endpoints
+
+**Total Effort:** ~38-48 hours  
+**Impact:** Unlocks analytics differentiation, reduces manual chasing, and provides leadership-grade visibility.
+
 ---
 
 ## 🎯 High-Impact Summary
@@ -577,14 +696,15 @@ POST /api/trial-balance/import-netsuite
 1. **Global Period Selector (#8)** - Eliminates repetitive context switching → Phase 1 ✅
 2. **Prior Period Comparison (#22)** - Streamlines month-over-month workflows → Phase 4 ⭐
 3. **NetSuite TB Auto-Import (#21)** - Eliminates manual reformatting → Phase 4 ⭐
-4. **My Reviews Queue (#15)** - Centralizes reviewer workflow → Phase 2
-5. **Quick Status Updates (#1)** - Saves time on most common action → Phase 1 ✅
+4. **Variance / Flux Analysis (#26)** - Turns TB data into action-ready explanations → Phase 6 ⭐ NEW
+5. **Automated Requests & Follow-Ups (#27)** - Keeps evidence gathering on autopilot → Phase 6 ⭐ NEW
 
 **Honorable Mentions:**
 - **Comment/Activity Feed (#9)** - Enables collaboration and audit trails → Phase 2
 - **Period Detail Page (#10)** - Single source of truth for close status → Phase 3 ✅
 - **Bulk Task Actions (#3)** - Essential for managing large close cycles → Phase 2 ✅
 - **Notification System (#6)** - Prevents missed deadlines → Phase 3 ✅
+ - **Bottleneck Analytics (#28)** - Provides data-backed resource planning → Phase 6 ⭐ NEW
 
 ---
 
@@ -595,8 +715,9 @@ POST /api/trial-balance/import-netsuite
 **Phase 3 (Weeks 4-5):** Advanced features - ~25 hours  
 **Phase 4 (Weeks 6-7):** Integration & period intelligence - ~16 hours ⭐ NEW  
 **Phase 5 (Ongoing):** Polish & enhancements - ~48 hours  
+**Phase 6 (Weeks 8-10):** Analytics suite & automation - ~38-48 hours ⭐ NEW  
 
-**Total Estimated Effort:** ~107 hours (core features) + ~17 hours (advanced integrations) = **~124 hours**  
+**Total Estimated Effort:** ~107 hours (core features) + ~17 hours (NetSuite/period intelligence) + ~38-48 hours (analytics & automation) = **~162-172 hours**  
 **Estimated Business Impact:** 30-40% reduction in close cycle time
 
 ---
@@ -627,10 +748,10 @@ For teams looking for immediate value, prioritize these:
 - Change management: release notes + in-app "What's New" (#12) banner pointing to comparison view
 
 ### Sprint 6 (Week 9): Variance, Requests, Analytics
-- Deliver #21 advanced thresholds + scheduled `flux_recompute_daily` job (variance queue with assignments)
-- Implement #22 prior-period deep-dive (YoY toggle, cached deltas)
-- Ship #22/#23 shared analytics tiles on Dashboard (critical path + workload heatmap preview)
-- Stand up #22 Requests “Chaser” API scaffolding with email/Slack templates and request board skeleton
+- Deliver #26 variance/flux queue with thresholds, explanation workflows, and `flux_recompute_daily` job
+- Implement #27 Requests “Chaser” APIs, templates, and reminder cadence service
+- Ship #28 analytics dashboards (critical path tile, workload heatmap preview) plus #33 KPI wiring
+- Extend frontend state and component library to support shared analytics cards across dashboard + tasks
 
 **Dependencies & Prep:**
 - Finalize database migrations for flux tables and requests messaging
@@ -639,50 +760,7 @@ For teams looking for immediate value, prioritize these:
 
 ---
 
-### 21. Variance / Flux Analysis Workflow
-**Problem:** Controllers need to explain material trial balance swings each period, but the app lacks a structured way to surface MoM/YoY/budget variances and capture explanations.
-
-**Solution:**
-- Compute absolute and percentage deltas per account/entity from imported trial balance snapshots.
-- Flag items breaching configurable thresholds (e.g., |Δ%| > 15%, |Δ$| > $10k) and generate a Flux Queue with owners, due dates, and immutable explanation threads.
-- Provide a Flux Dashboard (Δ$, Δ%, budget variance, owner, status), account detail view with trend chart, evidence attachments, and filters by entity/department/threshold presets.
-- Back end: extend data model with `account_period_metrics`, `flux_items`, `flux_explanations`; expose APIs (`GET /api/flux`, `POST /api/flux/{id}/explanations`, `PATCH /api/flux/{id}`) and nightly `flux_recompute_daily` job.
-
-**Impact:** Creates an auditable flux review, ensuring every flagged variance is owned, explained, and ready before marking the period closed.
-
-**Priority:** High
-
 ---
 
-### 22. Requests “Chaser” Automation
-**Problem:** Prep and review teams burn time chasing documents, answers, and sign-offs through ad-hoc email and Slack threads.
-
-**Solution:**
-- Let users create templated outreach tied to tasks or flux items, inject placeholders (period, due date, links), and send via email/Slack (`POST /api/requests`, `/api/requests/{id}/send`).
-- Track delivery, opens, replies, and auto-schedule reminders per cadence; ingest responses/attachments via inbound email and Slack webhooks to update status.
-- Surface a Requests Board (Pending → Completed), request detail modal, and message preview UI; store data in `requests` and `request_messages` tables and drive reminders with `requests_nudge_runner` job.
-
-**Impact:** Centralizes follow-ups, raises response rates, and keeps supporting evidence linked to the right task without manual wrangling.
-
-**Priority:** High
-
----
-
-### 23. Bottleneck & Workload Analytics
-**Problem:** Leadership lacks visibility into where the close stalls and how workload is distributed, making it hard to rebalance or hit the close deadline.
-
-**Solution:**
-- Mine audit logs and task history to compute cycle times, SLA adherence, aging-in-status, and dependency-driven critical paths; optionally materialize `task_time_slices` for faster queries.
-- Deliver dashboards with throughput metrics, workload heatmaps, bottleneck widgets, and a Critical Path list; expose supporting APIs (`GET /api/analytics/bottlenecks`, `/throughput`, `/critical-path`) and refresh aggregates via `analytics_rollup_hourly` job.
-- Gate detailed user-level views to Admin/Reviewer roles while keeping summary analytics visible to all.
-
-**Impact:** Highlights overdue hotspots, predicts completion velocity, and informs staffing adjustments for future periods.
-
-**Priority:** High
-
----
-
----
-
-*Last updated: 2025-11-01*
+*Last updated: 2025-11-02*
 *Status: Active planning document*

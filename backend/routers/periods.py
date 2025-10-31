@@ -257,6 +257,8 @@ async def create_period(
             TaskTemplateModel.is_active == True
         ).all()
         
+        # First pass: Create all tasks and build template->task mapping
+        template_to_task_map = {}
         for template in templates:
             due_date = _compute_due_datetime(db_period, template.days_offset or 0)
             task = TaskModel(
@@ -268,9 +270,23 @@ async def create_period(
                 department=template.department,
                 estimated_hours=template.estimated_hours,
                 is_recurring=True,
-                due_date=due_date
+                due_date=due_date,
+                position_x=template.position_x,
+                position_y=template.position_y
             )
             db.add(task)
+            db.flush()  # Flush to get task ID
+            template_to_task_map[template.id] = task
+        
+        # Second pass: Apply template dependencies to tasks
+        for template in templates:
+            if template.dependencies:
+                task = template_to_task_map.get(template.id)
+                if task:
+                    for dep_template in template.dependencies:
+                        dep_task = template_to_task_map.get(dep_template.id)
+                        if dep_task:
+                            task.dependencies.append(dep_task)
         
         db.commit()
     

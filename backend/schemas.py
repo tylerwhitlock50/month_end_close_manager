@@ -80,6 +80,8 @@ class TaskTemplateBase(BaseModel):
     estimated_hours: Optional[float] = None
     sort_order: int = 0
     default_account_numbers: List[str] = Field(default_factory=list)
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
 
     @validator('default_account_numbers', pre=True, always=True)
     def ensure_default_account_numbers(cls, value):
@@ -93,7 +95,7 @@ class TaskTemplateBase(BaseModel):
 
 
 class TaskTemplateCreate(TaskTemplateBase):
-    pass
+    dependency_ids: Optional[List[int]] = []
 
 
 class TaskTemplateUpdate(BaseModel):
@@ -106,6 +108,9 @@ class TaskTemplateUpdate(BaseModel):
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
     default_account_numbers: Optional[List[str]] = None
+    dependency_ids: Optional[List[int]] = None
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
 
 
 class TaskTemplate(TaskTemplateBase):
@@ -129,6 +134,8 @@ class TaskBase(BaseModel):
     priority: int = Field(5, ge=1, le=10)
     estimated_hours: Optional[float] = None
     notes: Optional[str] = None
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
 
 
 class TaskCreate(TaskBase):
@@ -147,6 +154,8 @@ class TaskUpdate(BaseModel):
     department: Optional[str] = None
     entity: Optional[str] = None
     priority: Optional[int] = Field(None, ge=1, le=10)
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
     estimated_hours: Optional[float] = None
     actual_hours: Optional[float] = None
     notes: Optional[str] = None
@@ -694,3 +703,48 @@ class FileCabinetStructure(BaseModel):
     period_files: List[FileWithUser] = []
     task_files: List[TaskWithFiles] = []
     trial_balance_files: List[TrialBalanceFileInfo] = []
+
+
+# Workflow Builder Schemas
+class PositionUpdate(BaseModel):
+    """Schema for updating node position in workflow builder"""
+    position_x: float
+    position_y: float
+
+
+class SimpleUser(BaseModel):
+    """Simplified user schema for workflow nodes"""
+    id: int
+    name: str
+    
+    class Config:
+        from_attributes = True
+
+
+class WorkflowNode(BaseModel):
+    """Schema for a node in the workflow builder"""
+    id: int
+    name: str
+    description: Optional[str] = None
+    status: Optional[str] = None  # Only for tasks, not templates
+    department: Optional[str] = None
+    owner: Optional[SimpleUser] = None
+    assignee: Optional[SimpleUser] = None
+    due_date: Optional[datetime] = None
+    priority: Optional[int] = None
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
+    dependency_ids: List[int] = []
+
+
+class WorkflowEdge(BaseModel):
+    """Schema for an edge connecting two nodes in the workflow"""
+    id: str
+    source: int  # Source node ID
+    target: int  # Target node ID
+
+
+class WorkflowResponse(BaseModel):
+    """Schema for workflow data with nodes and computed edges"""
+    nodes: List[WorkflowNode]
+    edges: List[WorkflowEdge]

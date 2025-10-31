@@ -12,6 +12,7 @@ import Reviews from './pages/Reviews'
 import Periods from './pages/Periods'
 import PeriodDetail from './pages/PeriodDetail'
 import Templates from './pages/Templates'
+import WorkflowBuilder from './pages/WorkflowBuilder'
 import TrialBalance from './pages/TrialBalance'
 import Users from './pages/Users'
 import Reports from './pages/Reports'
@@ -35,6 +36,7 @@ function App() {
         <Route path="/periods" element={<Periods />} />
         <Route path="/periods/:periodId" element={<PeriodDetail />} />
         <Route path="/templates" element={<Templates />} />
+        <Route path="/workflow" element={<WorkflowBuilder />} />
         <Route path="/trial-balance" element={<TrialBalance />} />
         <Route path="/file-cabinet" element={<FileCabinet />} />
         <Route path="/users" element={<Users />} />

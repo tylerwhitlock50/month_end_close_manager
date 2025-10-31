@@ -34,6 +34,10 @@ from backend.schemas import (
     TaskFileSummary,
     TaskCommentSummary,
     TaskSummary,
+    WorkflowResponse,
+    WorkflowNode,
+    WorkflowEdge,
+    PositionUpdate
 )
 from backend.services.trial_balance_linker import auto_link_tasks_to_trial_balance_accounts
 from backend.services.notifications import NotificationService
@@ -785,4 +789,144 @@ async def delete_task(
     db.delete(task)
     db.commit()
     return None
+
+
+# Workflow Builder Endpoints
+
+@router.get("/period/{period_id}/workflow")
+async def get_period_workflow(
+    period_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Get all tasks for a period as workflow nodes with computed edges."""
+    try:
+        # Verify period exists
+        period = db.query(PeriodModel).filter(PeriodModel.id == period_id).first()
+        if not period:
+            raise HTTPException(status_code=404, detail="Period not found")
+        
+        tasks = db.query(TaskModel).filter(TaskModel.period_id == period_id).all()
+        
+        # Build workflow nodes
+        nodes = []
+        for task in tasks:
+            dependency_ids = [dep.id for dep in task.dependencies]
+            node_data = {
+                "id": task.id,
+                "name": task.name,
+                "description": task.description,
+                "status": task.status.value if task.status else None,
+                "department": task.department,
+                "owner": {"id": task.owner.id, "name": task.owner.name} if task.owner else None,
+                "assignee": {"id": task.assignee.id, "name": task.assignee.name} if task.assignee else None,
+                "due_date": task.due_date.isoformat() if task.due_date else None,
+                "priority": task.priority,
+                "position_x": task.position_x,
+                "position_y": task.position_y,
+                "dependency_ids": dependency_ids
+            }
+            nodes.append(node_data)
+        
+        # Compute edges from dependencies
+        edges = []
+        for task in tasks:
+            for dep in task.dependencies:
+                edges.append({
+                    "id": f"{dep.id}-{task.id}",
+                    "source": dep.id,
+                    "target": task.id
+                })
+        
+        return {"nodes": nodes, "edges": edges}
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{task_id}/position")
+async def update_task_position(
+    task_id: int,
+    position: PositionUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Update the visual position of a task in the workflow builder."""
+    task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    task.position_x = position.position_x
+    task.position_y = position.position_y
+    
+    db.commit()
+    return {"success": True, "message": "Position updated"}
+
+
+@router.put("/{task_id}/dependencies")
+async def update_task_dependencies(
+    task_id: int,
+    dependency_ids: List[int],
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Update the dependencies for a task."""
+    task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Check for circular dependencies
+    def has_circular_dependency(task_id: int, target_id: int, visited: set = None) -> bool:
+        if visited is None:
+            visited = set()
+        if task_id == target_id:
+            return True
+        if task_id in visited:
+            return False
+        visited.add(task_id)
+        
+        task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+        if not task:
+            return False
+        
+        for dep in task.dependencies:
+            if has_circular_dependency(dep.id, target_id, visited):
+                return True
+        return False
+    
+    # Validate no circular dependencies
+    for dep_id in dependency_ids:
+        if has_circular_dependency(dep_id, task_id):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Circular dependency detected: task {dep_id} creates a cycle"
+            )
+    
+    # Log the change
+    old_dependency_ids = sorted([dep.id for dep in task.dependencies])
+    
+    # Update dependencies
+    task.dependencies = []
+    for dep_id in dependency_ids:
+        dep_task = db.query(TaskModel).filter(TaskModel.id == dep_id).first()
+        if dep_task:
+            task.dependencies.append(dep_task)
+    
+    # Log if dependencies changed
+    new_dependency_ids = sorted(dependency_ids)
+    if old_dependency_ids != new_dependency_ids:
+        log_task_change(
+            db,
+            task,
+            current_user,
+            "dependencies_updated",
+            str(old_dependency_ids),
+            str(new_dependency_ids)
+        )
+    
+    db.commit()
+    return {"success": True, "message": "Dependencies updated", "dependency_ids": dependency_ids}
 

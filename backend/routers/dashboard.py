@@ -3,7 +3,7 @@ from typing import Dict, List, Tuple
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from backend.database import get_db
 from backend.auth import get_current_user
@@ -235,8 +235,16 @@ async def get_my_reviews(
         approvals_query = approvals_query.filter(PeriodModel.is_active == True)
     
     approvals = approvals_query.order_by(ApprovalModel.requested_at.asc()).all()
-    
-    now = datetime.utcnow()
+
+    now_aware = datetime.now(timezone.utc)
+    now_naive = now_aware.replace(tzinfo=None)
+
+    def is_overdue_due_date(due_date: datetime | None) -> bool:
+        if not due_date:
+            return False
+        if due_date.tzinfo is None:
+            return due_date < now_naive
+        return due_date.astimezone(timezone.utc) < now_aware
     
     # Build review tasks
     review_tasks = []
@@ -244,7 +252,7 @@ async def get_my_reviews(
     
     for task in tasks:
         file_count = db.query(FileModel).filter(FileModel.task_id == task.id).count()
-        is_overdue = task.due_date and task.due_date < now
+        is_overdue = is_overdue_due_date(task.due_date)
         if is_overdue:
             overdue_count += 1
         
@@ -267,7 +275,7 @@ async def get_my_reviews(
     for approval in approvals:
         task = approval.task
         file_count = db.query(FileModel).filter(FileModel.task_id == task.id).count()
-        is_overdue = task.due_date and task.due_date < now
+        is_overdue = is_overdue_due_date(task.due_date)
         if is_overdue:
             overdue_count += 1
         

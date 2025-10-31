@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, LayoutGrid, List, UserCheck, ClipboardCheck, AlertTriangle, GitBranch, GitMerge, ArrowRight } from 'lucide-react'
+import {
+  Plus,
+  LayoutGrid,
+  List,
+  UserCheck,
+  ClipboardCheck,
+  AlertTriangle,
+  GitBranch,
+  GitMerge,
+  ArrowRight,
+  Calendar,
+} from 'lucide-react'
 import api from '../lib/api'
 import { formatDate } from '../lib/utils'
 import TaskBoard from '../components/TaskBoard'

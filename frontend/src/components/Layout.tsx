@@ -12,7 +12,8 @@ import {
   FileSpreadsheet,
   ClipboardList,
   FolderOpen,
-  ClipboardCheck
+  ClipboardCheck,
+  Workflow
 } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { useQuery } from '@tanstack/react-query'
@@ -93,6 +94,7 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Reviews', href: '/reviews', icon: ClipboardCheck, badge: reviewCount },
     { name: 'Periods', href: '/periods', icon: Calendar },
     { name: 'Templates', href: '/templates', icon: ClipboardList },
+    { name: 'Workflow Builder', href: '/workflow', icon: Workflow },
     { name: 'Trial Balance', href: '/trial-balance', icon: FileSpreadsheet },
     { name: 'File Cabinet', href: '/file-cabinet', icon: FolderOpen },
     { name: 'Users', href: '/users', icon: Users },

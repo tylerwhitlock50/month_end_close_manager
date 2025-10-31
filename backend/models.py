@@ -55,6 +55,15 @@ task_dependencies = Table(
 )
 
 
+# Association table for task template dependencies (many-to-many)
+task_template_dependencies = Table(
+    'task_template_dependencies',
+    Base.metadata,
+    Column('template_id', Integer, ForeignKey('task_templates.id', ondelete='CASCADE'), primary_key=True),
+    Column('depends_on_id', Integer, ForeignKey('task_templates.id', ondelete='CASCADE'), primary_key=True)
+)
+
+
 trial_balance_account_tasks = Table(
     'trial_balance_account_tasks',
     Base.metadata,
@@ -124,10 +133,24 @@ class TaskTemplate(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     sort_order = Column(Integer, default=0)
     
+    # Workflow visualization positions
+    position_x = Column(Float, nullable=True)
+    position_y = Column(Float, nullable=True)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
+    # Relationships
     tasks = relationship("Task", back_populates="template")
+    
+    # Self-referential many-to-many for template dependencies
+    dependencies = relationship(
+        "TaskTemplate",
+        secondary=task_template_dependencies,
+        primaryjoin=id == task_template_dependencies.c.template_id,
+        secondaryjoin=id == task_template_dependencies.c.depends_on_id,
+        backref="dependent_templates"
+    )
 
 
 class Task(Base):
@@ -156,6 +179,10 @@ class Task(Base):
     
     notes = Column(Text, nullable=True)
     is_recurring = Column(Boolean, default=False)
+    
+    # Workflow visualization positions
+    position_x = Column(Float, nullable=True)
+    position_y = Column(Float, nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
