@@ -101,6 +101,8 @@ This document contains comprehensive suggestions for improving the Month-End Clo
 
 **Priority:** Medium (6-8 hours)
 
+**Status:** ✅ Completed — task board/list now display dependency badges, the task modal lists upstream/downstream work, and the Tasks page surfaces a new "blocked vs. blockers" insight panel.
+
 ---
 
 ### 8. Improve Period Selection with Global Period Context
@@ -285,6 +287,8 @@ This document contains comprehensive suggestions for improving the Month-End Clo
 
 **Priority:** Medium
 
+**Status:** ✅ Completed — the Trial Balance view now includes one-click smart filters, configurable thresholds, and saved filter presets.
+
 ---
 
 ## 🎓 User Experience & Onboarding
@@ -466,6 +470,36 @@ POST /api/trial-balance/import-netsuite
 
 ---
 
+### 24. Drag-and-Drop Task Board Enhancements ✅
+**Problem:** The original kanban view required large cards and manual dropdown changes for every status update, limiting visibility and slowing triage during busy close windows.
+
+**Solution:**
+- Convert the task board to compact tiles so more work fits on screen while keeping key metadata visible.
+- Add expand/collapse toggles for each tile so preparers can surface full descriptions and quick actions only when needed.
+- Enable drag-and-drop between status columns; dropping a tile automatically updates the task status and refreshes the task list.
+- Keep lightweight inline controls (status picker, “Mark Complete”) inside the expanded view for keyboard-first workflows.
+
+**Impact:** Dramatically faster board triage, clearer high-level overview, and fewer clicks to keep tasks moving; supports both mouse-based drag/drop and traditional controls.
+
+**Status:** Completed (Tasks board v2 now shipped).
+
+---
+
+### 25. Trial Balance Task Spin-Off ✅
+**Problem:** Accountants reviewing the trial balance need to create follow-up tasks for anomalous accounts quickly, then reuse those assignments in future periods. Manually hopping to the Tasks screen breaks the workflow and loses context.
+
+**Solution:**
+- Add an inline “Create task from this account” form inside the Trial Balance account modal.
+- Allow preparers to set owner, assignee, due date, priority, and status without leaving the TB.
+- Offer a “Save as template” toggle that generates a task template (with period offset) so future periods auto-spawn the assignment.
+- Automatically link the newly created task back to the account for audit history.
+
+**Impact:** Cuts the handoff loop between TB review and task creation, enables template-driven roll-forward assignments, and keeps account-supporting tasks in lockstep.
+
+**Status:** Completed (shipped alongside smart filters).
+
+---
+
 ## 📅 Implementation Roadmap
 
 ### Phase 1: Quick Wins (Week 1)
@@ -479,6 +513,7 @@ POST /api/trial-balance/import-netsuite
 ### Phase 2: Core Features (Weeks 2-3)
 - ✅ #9: Comment feed (3-4 hours)
 - ✅ #4: Bottleneck dashboard (2-3 hours)
+- ✅ #24: Drag-and-drop task board (2-3 hours)
 - ✅ #3: Bulk task actions (3-4 hours)
 - ✅ #15: My Reviews queue (3-4 hours)
 
@@ -488,8 +523,8 @@ POST /api/trial-balance/import-netsuite
 ### Phase 3: Advanced Features (Weeks 4-5)
 - ✅ #6: Notification system (4-5 hours)
 - ✅ #10: Period detail page (6-8 hours)
-- 🔲 #7: Dependencies visualization (6-8 hours)
-- 🔲 #18: Smart TB filters (3-4 hours)
+ - ✅ #7: Dependencies visualization (6-8 hours)
+ - ✅ #18: Smart TB filters (3-4 hours)
 
 **Total Effort:** ~25 hours  
 **Impact:** Complete workflow transformation
@@ -583,10 +618,27 @@ For teams looking for immediate value, prioritize these:
 
 **Special Note for NetSuite Users:** Phase 4 should be prioritized right after Phase 1-2. The NetSuite TB Auto-Import feature (#21) alone saves 10-15 minutes per month and virtually eliminates import errors, making it a quick ROI for teams using NetSuite.
 
+## 🚀 Upcoming Sprints
+
+### Sprint 5 (Week 8): NetSuite & Flux Foundations
+- Build #21 NetSuite trial balance auto-import (parser hardening, preview report, import summary)
+- Ship #22 prior-period comparison MVP across File Cabinet and Task Detail
+- Add regression coverage for new importer routes and prior-period APIs
+- Change management: release notes + in-app "What's New" (#12) banner pointing to comparison view
+
+### Sprint 6 (Week 9): Variance, Requests, Analytics
+- Deliver #21 advanced thresholds + scheduled `flux_recompute_daily` job (variance queue with assignments)
+- Implement #22 prior-period deep-dive (YoY toggle, cached deltas)
+- Ship #22/#23 shared analytics tiles on Dashboard (critical path + workload heatmap preview)
+- Stand up #22 Requests “Chaser” API scaffolding with email/Slack templates and request board skeleton
+
+**Dependencies & Prep:**
+- Finalize database migrations for flux tables and requests messaging
+- Align frontend state management on shared period context for comparisons
+- Confirm notification service can support reminder cadence (leverages #6)
+
 ---
 
-*Last updated: 2025-10-31*
-*Status: Active planning document*
 ### 21. Variance / Flux Analysis Workflow
 **Problem:** Controllers need to explain material trial balance swings each period, but the app lacks a structured way to surface MoM/YoY/budget variances and capture explanations.
 
@@ -629,3 +681,8 @@ For teams looking for immediate value, prioritize these:
 **Priority:** High
 
 ---
+
+---
+
+*Last updated: 2025-11-01*
+*Status: Active planning document*

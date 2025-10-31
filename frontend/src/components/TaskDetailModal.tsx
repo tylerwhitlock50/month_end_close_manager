@@ -1,9 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { X, Paperclip, Loader2, Download, CheckCircle2, MessageSquare, History } from 'lucide-react'
+import {
+  X,
+  Paperclip,
+  Loader2,
+  Download,
+  CheckCircle2,
+  MessageSquare,
+  History,
+  AlertTriangle,
+  GitBranch,
+  GitMerge,
+  Calendar,
+  ArrowRight,
+  UserCheck,
+  Trash2,
+} from 'lucide-react'
 import api from '../lib/api'
-import { formatDate, formatDateTime, getStatusLabel } from '../lib/utils'
+import { formatDate, formatDateTime, getStatusLabel, getStatusColor } from '../lib/utils'
 import FilePreviewModal from './FilePreviewModal'
 import TaskTimeline from './TaskTimeline'
 
@@ -11,6 +26,13 @@ interface TaskDetailModalProps {
   taskId: number
   onClose: () => void
   onUpdated: () => void
+}
+
+interface DependencySummary {
+  id: number
+  name: string
+  status: string
+  due_date?: string
 }
 
 interface TaskResponse {
@@ -26,6 +48,8 @@ interface TaskResponse {
   period?: { id: number; name: string }
   owner?: { id: number; name: string }
   assignee?: { id: number; name: string }
+  dependency_details?: DependencySummary[]
+  dependent_details?: DependencySummary[]
 }
 
 interface TaskFile {
@@ -77,6 +101,17 @@ interface PriorTaskSnapshot {
   comments: PriorTaskComment[]
 }
 
+interface Approval {
+  id: number
+  task_id: number
+  reviewer_id: number
+  status: string
+  notes?: string
+  requested_at: string
+  reviewed_at?: string
+  reviewer?: { id: number; name: string }
+}
+
 const STATUS_OPTIONS = [
   { id: 'not_started', label: 'Not Started' },
   { id: 'in_progress', label: 'In Progress' },
@@ -115,6 +150,8 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
   const [commentInternal, setCommentInternal] = useState(false)
   const [commentError, setCommentError] = useState('')
   const [previewFile, setPreviewFile] = useState<TaskFile | null>(null)
+  const [showApprovalModal, setShowApprovalModal] = useState(false)
+  const [selectedReviewerId, setSelectedReviewerId] = useState<number | ''>('')
 
   const { data: taskData, isLoading: taskLoading, refetch: refetchTask } = useQuery<TaskResponse>({
     queryKey: ['task', taskId],
@@ -153,6 +190,14 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
     queryFn: async () => {
       const response = await api.get('/api/users/')
       return response.data as Array<{ id: number; name: string }>
+    },
+  })
+
+  const { data: approvals, refetch: refetchApprovals } = useQuery<Approval[]>({
+    queryKey: ['task-approvals', taskId],
+    queryFn: async () => {
+      const response = await api.get(`/api/approvals/task/${taskId}`)
+      return response.data
     },
   })
 
@@ -267,6 +312,37 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
     addCommentMutation.mutate()
   }
 
+  const createApprovalMutation = useMutation({
+    mutationFn: async (reviewerId: number) => {
+      const response = await api.post('/api/approvals/', {
+        task_id: taskId,
+        reviewer_id: reviewerId,
+      })
+      return response.data
+    },
+    onSuccess: () => {
+      refetchApprovals()
+      queryClient.invalidateQueries({ queryKey: ['my-reviews'] })
+      setShowApprovalModal(false)
+      setSelectedReviewerId('')
+    },
+  })
+
+  const deleteApprovalMutation = useMutation({
+    mutationFn: async (approvalId: number) => {
+      await api.delete(`/api/approvals/${approvalId}`)
+    },
+    onSuccess: () => {
+      refetchApprovals()
+      queryClient.invalidateQueries({ queryKey: ['my-reviews'] })
+    },
+  })
+
+  const handleRequestApproval = () => {
+    if (!selectedReviewerId) return
+    createApprovalMutation.mutate(selectedReviewerId as number)
+  }
+
   const onSubmit = (data: TaskUpdateForm) => {
     updateMutation.mutate(data)
   }
@@ -302,6 +378,10 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
   const markButtonDisabled = currentStatus === 'complete' || updateMutation.isPending
   const markButtonClass = currentStatus === 'review' ? 'btn-success' : 'btn-secondary'
 
+  const dependencyDetails = (taskData?.dependency_details ?? []) as DependencySummary[]
+  const dependentDetails = (taskData?.dependent_details ?? []) as DependencySummary[]
+  const incompleteDependencies = dependencyDetails.filter((dep) => dep.status !== 'complete')
+
   const headerSubtitle = useMemo(() => {
     if (!taskData) return ''
     const parts: string[] = []
@@ -313,6 +393,10 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
   const handlePriorFileDownload = (fileId: number) => {
     const base = api.defaults.baseURL || ''
     window.open(`${base.replace(/\/$/, '')}/api/files/download/${fileId}?inline=0`, '_blank')
+  }
+
+  const handleNavigateToTask = (targetTaskId: number) => {
+    window.open(`/tasks?highlight=${targetTaskId}`, '_blank')
   }
 
   return (
@@ -383,6 +467,116 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
               <div>
                 <label className="label">Priority</label>
                 <input type="number" min={1} max={10} {...register('priority', { valueAsNumber: true })} className="input" />
+              </div>
+            </section>
+
+            <section className="grid gap-4 md:grid-cols-2">
+              <div className="border border-gray-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                    <GitBranch className="w-4 h-4" /> Dependencies
+                  </h3>
+                  {dependencyDetails.length > 0 && (
+                    <span className="text-xs text-gray-500">
+                      {incompleteDependencies.length} open of {dependencyDetails.length}
+                    </span>
+                  )}
+                </div>
+                {dependencyDetails.length === 0 ? (
+                  <p className="text-sm text-gray-500">This task is not waiting on any other work.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {dependencyDetails.map((dependency) => (
+                      <li
+                        key={dependency.id}
+                        className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2"
+                      >
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{dependency.name}</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                            <span className={`badge badge-${getStatusColor(dependency.status)}`}>
+                              {getStatusLabel(dependency.status)}
+                            </span>
+                            {dependency.due_date && (
+                              <span className="inline-flex items-center gap-1">
+                                <Calendar className="h-3 w-3" />
+                                {formatDate(dependency.due_date)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-secondary text-xs"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            handleNavigateToTask(dependency.id)
+                          }}
+                        >
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {incompleteDependencies.length > 0 && (
+                  <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    <span>
+                      {incompleteDependencies.length === 1
+                        ? 'One dependency is still outstanding.'
+                        : `${incompleteDependencies.length} dependencies are still outstanding.`}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="border border-gray-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                    <GitMerge className="w-4 h-4 text-purple-600" /> Downstream Tasks
+                  </h3>
+                  {dependentDetails.length > 0 && (
+                    <span className="text-xs text-purple-600">Blocking {dependentDetails.length}</span>
+                  )}
+                </div>
+                {dependentDetails.length === 0 ? (
+                  <p className="text-sm text-gray-500">No other tasks are waiting on this item.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {dependentDetails.map((dependent) => (
+                      <li
+                        key={dependent.id}
+                        className="flex items-center justify-between gap-3 rounded-md border border-purple-200 bg-purple-50 px-3 py-2"
+                      >
+                        <div>
+                          <p className="text-sm font-medium text-purple-900">{dependent.name}</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-purple-700">
+                            <span className={`badge badge-${getStatusColor(dependent.status)}`}>
+                              {getStatusLabel(dependent.status)}
+                            </span>
+                            {dependent.due_date && (
+                              <span className="inline-flex items-center gap-1">
+                                <Calendar className="h-3 w-3" />
+                                {formatDate(dependent.due_date)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-secondary text-xs"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            handleNavigateToTask(dependent.id)
+                          }}
+                        >
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </section>
 
@@ -465,6 +659,82 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
                   )}
                 </div>
               </div>
+            </section>
+
+            {/* Approval Requests Section */}
+            <section className="border border-gray-200 rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-green-600" /> Approval Requests
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowApprovalModal(true)}
+                  className="btn-secondary text-xs"
+                >
+                  + Request Approval
+                </button>
+              </div>
+              
+              {approvals && approvals.length > 0 ? (
+                <div className="space-y-2">
+                  {approvals.map((approval) => (
+                    <div
+                      key={approval.id}
+                      className={`p-3 rounded-lg border ${
+                        approval.status === 'pending'
+                          ? 'border-yellow-200 bg-yellow-50'
+                          : approval.status === 'approved'
+                          ? 'border-green-200 bg-green-50'
+                          : 'border-red-200 bg-red-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <p className="text-sm font-medium text-gray-900">
+                              {approval.reviewer?.name || 'Unknown Reviewer'}
+                            </p>
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full ${
+                                approval.status === 'pending'
+                                  ? 'bg-yellow-100 text-yellow-800'
+                                  : approval.status === 'approved'
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}
+                            >
+                              {approval.status}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-600">
+                            Requested: {formatDateTime(approval.requested_at)}
+                            {approval.reviewed_at && ` • Reviewed: ${formatDateTime(approval.reviewed_at)}`}
+                          </p>
+                          {approval.notes && (
+                            <p className="text-xs text-gray-700 mt-2 italic border-l-2 border-gray-300 pl-2">
+                              {approval.notes}
+                            </p>
+                          )}
+                        </div>
+                        {approval.status === 'pending' && (
+                          <button
+                            type="button"
+                            onClick={() => deleteApprovalMutation.mutate(approval.id)}
+                            className="text-red-600 hover:text-red-800 p-1"
+                            title="Cancel approval request"
+                            disabled={deleteApprovalMutation.isPending}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">No approval requests yet.</p>
+              )}
             </section>
 
             {priorTask && (
@@ -619,6 +889,58 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
           externalUrl={previewFile.external_url}
           onClose={() => setPreviewFile(null)}
         />
+      )}
+
+      {/* Approval Request Modal */}
+      {showApprovalModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-xl font-semibold text-gray-900">Request Approval</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Select a reviewer to request approval for this task
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="label">Reviewer</label>
+                <select
+                  className="input"
+                  value={selectedReviewerId}
+                  onChange={(e) => setSelectedReviewerId(e.target.value ? Number(e.target.value) : '')}
+                >
+                  <option value="">Select a reviewer...</option>
+                  {users?.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="text-xs text-gray-500">
+                <p>The selected reviewer will see this task in their Reviews screen and can approve, reject, or request revisions.</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
+              <button
+                onClick={() => {
+                  setShowApprovalModal(false)
+                  setSelectedReviewerId('')
+                }}
+                className="btn-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRequestApproval}
+                className="btn-primary disabled:opacity-50"
+                disabled={!selectedReviewerId || createApprovalMutation.isPending}
+              >
+                {createApprovalMutation.isPending ? 'Requesting...' : 'Request Approval'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

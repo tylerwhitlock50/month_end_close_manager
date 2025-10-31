@@ -169,15 +169,6 @@ class Task(TaskBase):
         from_attributes = True
 
 
-class TaskWithRelations(Task):
-    owner: User
-    assignee: Optional[User] = None
-    period: Period
-    file_count: int = 0
-    pending_approvals: int = 0
-    dependencies: List[int] = []
-
-
 class TaskSummary(BaseModel):
     id: int
     name: str
@@ -186,6 +177,17 @@ class TaskSummary(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class TaskWithRelations(Task):
+    owner: User
+    assignee: Optional[User] = None
+    period: Period
+    file_count: int = 0
+    pending_approvals: int = 0
+    dependencies: List[int] = []
+    dependency_details: List[TaskSummary] = []
+    dependent_details: List[TaskSummary] = []
 
 
 class CriticalPathItem(BaseModel):
@@ -615,6 +617,19 @@ class TrialBalanceComparison(BaseModel):
     period_id: int
     previous_period_id: Optional[int]
     accounts: List[TrialBalanceComparisonAccount] = []
+
+
+class TrialBalanceAccountTaskCreate(BaseModel):
+    name: str
+    owner_id: int
+    description: Optional[str] = None
+    assignee_id: Optional[int] = None
+    status: TaskStatus = TaskStatus.NOT_STARTED
+    due_date: Optional[datetime] = None
+    priority: Optional[int] = Field(None, ge=1, le=10)
+    department: Optional[str] = None
+    save_as_template: bool = False
+    template_name: Optional[str] = None
 
 
 class TaskFileSummary(BaseModel):

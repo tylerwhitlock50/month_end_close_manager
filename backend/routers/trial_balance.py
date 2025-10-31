@@ -3,9 +3,10 @@ import io
 import os
 import uuid
 from decimal import Decimal, InvalidOperation
-from datetime import datetime
+from datetime import datetime, timezone, date
 from pathlib import Path
 from typing import List, Optional
+import calendar
 
 from fastapi import (
     APIRouter,
@@ -29,7 +30,12 @@ from backend.models import (
     TrialBalanceValidation as TrialBalanceValidationModel,
     Period as PeriodModel,
     Task as TaskModel,
-    User as UserModel
+    TaskTemplate as TaskTemplateModel,
+    User as UserModel,
+    File as FileModel,
+    Approval as ApprovalModel,
+    TaskStatus,
+    ApprovalStatus,
 )
 from backend.schemas import (
     TrialBalance,
@@ -42,6 +48,9 @@ from backend.schemas import (
     TrialBalanceValidation,
     TrialBalanceComparison,
     TrialBalanceComparisonAccount,
+    TrialBalanceAccountTaskCreate,
+    TaskWithRelations,
+    TaskSummary,
 )
 from backend.services.trial_balance_linker import auto_link_tasks_to_trial_balance_accounts
 from backend.services.netsuite_parser import parse_netsuite_trial_balance
@@ -205,6 +214,54 @@ def _get_previous_period(db: Session, period: PeriodModel) -> Optional[PeriodMod
         .order_by(PeriodModel.year.desc(), PeriodModel.month.desc())
         .first()
     )
+
+
+def _map_task_to_summary(task: TaskModel) -> TaskSummary:
+    return TaskSummary.model_validate(task, from_attributes=True)
+
+
+def _build_task_payload(db: Session, task: TaskModel) -> dict:
+    file_count = db.query(FileModel).filter(FileModel.task_id == task.id).count()
+    pending_approvals = (
+        db.query(ApprovalModel)
+        .filter(ApprovalModel.task_id == task.id, ApprovalModel.status == ApprovalStatus.PENDING)
+        .count()
+    )
+
+    payload = TaskWithRelations.model_validate(task, from_attributes=True).model_dump()
+    payload["owner"] = task.owner
+    payload["assignee"] = task.assignee
+    payload["period"] = task.period
+    payload["file_count"] = file_count
+    payload["pending_approvals"] = pending_approvals
+    payload["dependencies"] = [dep.id for dep in task.dependencies]
+    payload["dependency_details"] = [
+        _map_task_to_summary(dep).model_dump()
+        for dep in task.dependencies
+    ]
+    payload["dependent_details"] = [
+        _map_task_to_summary(dep).model_dump()
+        for dep in task.dependent_tasks
+    ]
+    return payload
+
+
+def _calculate_template_offset(period: PeriodModel, due_date: Optional[datetime]) -> int:
+    if not due_date:
+        return 0
+
+    if period.target_close_date:
+        anchor = period.target_close_date
+    else:
+        last_day = calendar.monthrange(period.year, period.month)[1]
+        anchor = date(period.year, period.month, last_day)
+
+    if due_date.tzinfo is not None:
+        due = due_date.astimezone(timezone.utc).date()
+    else:
+        due = due_date.date()
+
+    return (due - anchor).days
 
 
 def _format_notes_from_metadata(metadata: dict, warnings: list[str]) -> Optional[str]:
@@ -691,6 +748,79 @@ async def update_trial_balance_account(
     db.refresh(account)
 
     return account
+
+
+@router.post(
+    "/accounts/{account_id}/tasks",
+    response_model=TaskWithRelations,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_account_task(
+    account_id: int,
+    payload: TrialBalanceAccountTaskCreate,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+):
+    account = (
+        db.query(TrialBalanceAccountModel)
+        .options(selectinload(TrialBalanceAccountModel.trial_balance).selectinload(TrialBalanceModel.period))
+        .filter(TrialBalanceAccountModel.id == account_id)
+        .first()
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Trial balance account not found")
+
+    trial_balance = account.trial_balance
+    if not trial_balance:
+        raise HTTPException(status_code=400, detail="Account is missing trial balance context")
+
+    period = trial_balance.period
+    if not period:
+        raise HTTPException(status_code=400, detail="Account period is not available")
+
+    owner = db.query(UserModel).filter(UserModel.id == payload.owner_id).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+
+    assignee = None
+    if payload.assignee_id is not None:
+        assignee = db.query(UserModel).filter(UserModel.id == payload.assignee_id).first()
+        if not assignee:
+            raise HTTPException(status_code=404, detail="Assignee not found")
+
+    new_task = TaskModel(
+        period_id=period.id,
+        name=payload.name,
+        description=payload.description,
+        owner_id=payload.owner_id,
+        assignee_id=payload.assignee_id,
+        status=payload.status,
+        due_date=payload.due_date,
+        priority=payload.priority if payload.priority is not None else 5,
+        department=payload.department or account.account_type,
+    )
+
+    db.add(new_task)
+    account.tasks.append(new_task)
+    db.flush()
+
+    if payload.save_as_template:
+        template = TaskTemplateModel(
+            name=payload.template_name or payload.name,
+            description=payload.description,
+            close_type=period.close_type,
+            default_owner_id=payload.owner_id,
+            department=payload.department or account.account_type,
+            days_offset=_calculate_template_offset(period, payload.due_date),
+        )
+        db.add(template)
+        db.flush()
+        new_task.template_id = template.id
+
+    db.commit()
+    db.refresh(new_task)
+
+    return _build_task_payload(db, new_task)
 
 
 @router.put("/accounts/{account_id}/tasks", response_model=TrialBalanceAccount)

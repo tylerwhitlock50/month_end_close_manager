@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { X, CheckCircle2, Loader2, Trash2, Link as LinkIcon, Upload } from 'lucide-react'
+import clsx from 'clsx'
+import {
+  X,
+  CheckCircle2,
+  Loader2,
+  Trash2,
+  Link as LinkIcon,
+  Upload,
+  Calendar,
+  BookmarkPlus,
+  Loader,
+} from 'lucide-react'
 import api from '../lib/api'
 
 interface TaskOption {
@@ -60,6 +71,16 @@ interface TrialBalanceAccountModalProps {
   onRefetch: () => void
 }
 
+type TaskStatusValue = 'not_started' | 'in_progress' | 'review' | 'complete' | 'blocked'
+
+const TASK_STATUS_OPTIONS: Array<{ value: TaskStatusValue; label: string }> = [
+  { value: 'not_started', label: 'Not Started' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'review', label: 'Ready for Review' },
+  { value: 'complete', label: 'Complete' },
+  { value: 'blocked', label: 'Blocked' },
+]
+
 function formatCurrency(value?: number | null) {
   if (value === undefined || value === null) return '-'
   return new Intl.NumberFormat('en-US', {
@@ -99,6 +120,16 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
   const [validationFile, setValidationFile] = useState<File | null>(null)
   const [validationError, setValidationError] = useState('')
   const [validationFileDate, setValidationFileDate] = useState('')
+  const [newTaskName, setNewTaskName] = useState(`${account.account_name} Task`)
+  const [newTaskDescription, setNewTaskDescription] = useState('')
+  const [newTaskOwnerId, setNewTaskOwnerId] = useState<number | ''>('')
+  const [newTaskAssigneeId, setNewTaskAssigneeId] = useState<number | ''>('')
+  const [newTaskStatus, setNewTaskStatus] = useState<TaskStatusValue>('not_started')
+  const [newTaskDueDate, setNewTaskDueDate] = useState('')
+  const [newTaskPriority, setNewTaskPriority] = useState<number>(5)
+  const [saveAsTemplate, setSaveAsTemplate] = useState(false)
+  const [templateName, setTemplateName] = useState(`${account.account_name} Task Template`)
+  const [createTaskError, setCreateTaskError] = useState('')
 
   useEffect(() => {
     setNotes(account.notes ?? '')
@@ -108,8 +139,18 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
     setValidationTaskId('')
     setValidationNotes('')
     setValidationFile(null)
-    setValidationError('')
+   setValidationError('')
     setValidationFileDate('')
+    setNewTaskName(`${account.account_name} Task`)
+    setNewTaskDescription('')
+    setNewTaskOwnerId('')
+    setNewTaskAssigneeId('')
+    setNewTaskStatus('not_started')
+    setNewTaskDueDate('')
+    setNewTaskPriority(5)
+    setSaveAsTemplate(false)
+    setTemplateName(`${account.account_name} Task Template`)
+    setCreateTaskError('')
   }, [account])
 
   const tasksQuery = useQuery({
@@ -123,6 +164,14 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
         },
       })
       return response.data as TaskOption[]
+    },
+  })
+
+  const usersQuery = useQuery({
+    queryKey: ['users'],
+    queryFn: async () => {
+      const response = await api.get('/api/users/')
+      return response.data as Array<{ id: number; name: string }>
     },
   })
 
@@ -195,6 +244,42 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
     },
     onError: (error: any) => {
       setValidationError(error.response?.data?.detail || 'Failed to save validation')
+    },
+  })
+
+  const createTaskMutation = useMutation({
+    mutationFn: async (payload: {
+      name: string
+      description?: string
+      owner_id: number
+      assignee_id?: number
+      status: TaskStatusValue
+      due_date?: string
+      priority?: number
+      department?: string
+      save_as_template?: boolean
+      template_name?: string
+    }) => {
+      const response = await api.post(`/api/trial-balance/accounts/${account.id}/tasks`, payload)
+      return response.data as TaskOption
+    },
+    onSuccess: (createdTask) => {
+      setCreateTaskError('')
+      setSelectedTaskIds((prev) => Array.from(new Set([...prev, createdTask.id])))
+      setNewTaskName(`${account.account_name} Task`)
+      setNewTaskDescription('')
+      setNewTaskOwnerId('')
+      setNewTaskAssigneeId('')
+      setNewTaskStatus('not_started')
+      setNewTaskDueDate('')
+      setNewTaskPriority(5)
+      setSaveAsTemplate(false)
+      setTemplateName(`${account.account_name} Task Template`)
+      onRefetch()
+      tasksQuery.refetch()
+    },
+    onError: (error: any) => {
+      setCreateTaskError(error.response?.data?.detail || 'Unable to create task')
     },
   })
 
@@ -288,6 +373,7 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
   }
 
   const taskOptions = useMemo(() => tasksQuery.data ?? [], [tasksQuery.data])
+  const userOptions = useMemo(() => usersQuery.data ?? [], [usersQuery.data])
 
   const handleValidationSubmit = () => {
     if (!validationAmount || validationAmount.trim() === '') {
@@ -316,6 +402,60 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
 
   const handleValidationDelete = (validationId: number) => {
     deleteValidationMutation.mutate(validationId)
+  }
+
+  const handleCreateTask = () => {
+    if (!newTaskName.trim()) {
+      setCreateTaskError('Provide a task name before creating it')
+      return
+    }
+    if (newTaskOwnerId === '') {
+      setCreateTaskError('Select an owner before creating the task')
+      return
+    }
+
+    const payload: {
+      name: string
+      description?: string
+      owner_id: number
+      assignee_id?: number
+      status: TaskStatusValue
+      due_date?: string
+      priority?: number
+      department?: string
+      save_as_template?: boolean
+      template_name?: string
+    } = {
+      name: newTaskName.trim(),
+      owner_id: Number(newTaskOwnerId),
+      status: newTaskStatus,
+    }
+
+    if (newTaskDescription.trim()) {
+      payload.description = newTaskDescription.trim()
+    }
+    if (newTaskAssigneeId !== '') {
+      payload.assignee_id = Number(newTaskAssigneeId)
+    }
+    if (newTaskDueDate) {
+      const dateValue = new Date(newTaskDueDate)
+      if (!Number.isNaN(dateValue.getTime())) {
+        payload.due_date = dateValue.toISOString()
+      }
+    }
+    if (newTaskPriority) {
+      payload.priority = newTaskPriority
+    }
+    if (account.account_type) {
+      payload.department = account.account_type
+    }
+    if (saveAsTemplate) {
+      payload.save_as_template = true
+      payload.template_name = (templateName || newTaskName).trim()
+    }
+
+    setCreateTaskError('')
+    createTaskMutation.mutate(payload)
   }
 
   return (
@@ -393,6 +533,148 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
               onChange={(event) => setNotes(event.target.value)}
               placeholder="Add supporting commentary, reconciliation notes, or next steps."
             />
+          </div>
+
+          <div className="border border-gray-200 rounded-lg p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Create task from this account</h3>
+                <p className="text-xs text-gray-500">Spin up a follow-up task and link it automatically.</p>
+              </div>
+            </div>
+
+            {createTaskError && <p className="text-xs text-red-600">{createTaskError}</p>}
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="label">Task name</label>
+                <input
+                  className="input"
+                  value={newTaskName}
+                  onChange={(event) => setNewTaskName(event.target.value)}
+                  placeholder="e.g., Reconcile cash - January"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="label">Owner</label>
+                <select
+                  className="input"
+                  value={newTaskOwnerId}
+                  onChange={(event) => setNewTaskOwnerId(event.target.value ? Number(event.target.value) : '')}
+                >
+                  <option value="">Select owner</option>
+                  {userOptions.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="label">Assignee</label>
+                <select
+                  className="input"
+                  value={newTaskAssigneeId}
+                  onChange={(event) => setNewTaskAssigneeId(event.target.value ? Number(event.target.value) : '')}
+                >
+                  <option value="">Unassigned</option>
+                  {userOptions.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="label">Status</label>
+                <select
+                  className="input"
+                  value={newTaskStatus}
+                  onChange={(event) => setNewTaskStatus(event.target.value as TaskStatusValue)}
+                >
+                  {TASK_STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="label">Due date</label>
+                <input
+                  type="datetime-local"
+                  className="input"
+                  value={newTaskDueDate}
+                  onChange={(event) => setNewTaskDueDate(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="label">Priority</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  className="input"
+                  value={newTaskPriority}
+                  onChange={(event) => {
+                    const numeric = Number(event.target.value)
+                    setNewTaskPriority(Number.isNaN(numeric) ? 5 : numeric)
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="label">Description</label>
+              <textarea
+                className="input min-h-[80px]"
+                value={newTaskDescription}
+                onChange={(event) => setNewTaskDescription(event.target.value)}
+                placeholder="Provide instructions or context for the assignee"
+              />
+            </div>
+
+            <div className="flex items-center gap-3">
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={saveAsTemplate}
+                  onChange={(event) => setSaveAsTemplate(event.target.checked)}
+                />
+                Save as template for future periods
+              </label>
+              {saveAsTemplate && (
+                <input
+                  className="input text-sm"
+                  value={templateName}
+                  onChange={(event) => setTemplateName(event.target.value)}
+                  placeholder="Template name"
+                />
+              )}
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500">New task will be linked automatically to this account.</span>
+              <button
+                type="button"
+                className={clsx(
+                  'btn-primary text-sm flex items-center gap-2',
+                  createTaskMutation.isPending && 'opacity-80 cursor-wait'
+                )}
+                onClick={handleCreateTask}
+                disabled={createTaskMutation.isPending}
+              >
+                {createTaskMutation.isPending ? (
+                  <>
+                    <Loader className="h-4 w-4 animate-spin" /> Creating…
+                  </>
+                ) : (
+                  <>
+                    <BookmarkPlus className="h-4 w-4" /> Create & link task
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
           <div className="border border-gray-200 rounded-lg p-4">

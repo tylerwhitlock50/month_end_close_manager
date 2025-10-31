@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import clsx from 'clsx'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Calendar, User, Paperclip, CheckCircle2 } from 'lucide-react'
+import { Calendar, User, Paperclip, CheckCircle2, AlertTriangle, GitBranch, GitMerge } from 'lucide-react'
 import { formatDate, getStatusColor, getStatusLabel } from '../lib/utils'
 import api from '../lib/api'
 
@@ -165,12 +166,32 @@ export default function TaskList({ tasks, onSelectTask, selectedTaskIds, onSelec
               </td>
             </tr>
           ) : (
-            tasks.map((task) => (
-              <tr
-                key={task.id}
-                className={`hover:bg-gray-50 cursor-pointer ${selectedTaskIds.includes(task.id) ? 'bg-primary-50/40' : ''}`}
-                onClick={() => onSelectTask?.(task)}
-              >
+            tasks.map((task) => {
+              const dependencyDetails = (task.dependency_details ?? []) as Array<{
+                id: number
+                name: string
+                status: string
+                due_date?: string
+              }>
+              const dependentDetails = (task.dependent_details ?? []) as Array<{
+                id: number
+                name: string
+                status: string
+                due_date?: string
+              }>
+              const incompleteDependencies = dependencyDetails.filter((dep) => dep.status !== 'complete')
+              const isBlocked = incompleteDependencies.length > 0
+
+              return (
+                <tr
+                  key={task.id}
+                  className={clsx(
+                    'hover:bg-gray-50 cursor-pointer transition-colors',
+                    selectedTaskIds.includes(task.id) ? 'bg-primary-50/40' : '',
+                    isBlocked && 'border-l-4 border-red-300'
+                  )}
+                  onClick={() => onSelectTask?.(task)}
+                >
                 <td className="px-3 py-4">
                   <input
                     type="checkbox"
@@ -188,6 +209,35 @@ export default function TaskList({ tasks, onSelectTask, selectedTaskIds, onSelec
                     {task.description && (
                       <div className="text-sm text-gray-500 line-clamp-1">
                         {task.description}
+                      </div>
+                    )}
+                    {(dependencyDetails.length > 0 || dependentDetails.length > 0) && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                        {dependencyDetails.length > 0 && (
+                          <span
+                            className={clsx(
+                              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 border',
+                              isBlocked ? 'border-red-200 bg-red-100 text-red-700' : 'border-blue-200 bg-blue-50 text-blue-700'
+                            )}
+                          >
+                            {isBlocked ? (
+                              <>
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                                Blocked by {incompleteDependencies.length}/{dependencyDetails.length}
+                              </>
+                            ) : (
+                              <>
+                                <GitBranch className="h-3.5 w-3.5" />
+                                Dependencies {dependencyDetails.length}
+                              </>
+                            )}
+                          </span>
+                        )}
+                        {dependentDetails.length > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-purple-200 bg-purple-50 px-2 py-0.5 text-purple-700">
+                            <GitMerge className="h-3.5 w-3.5" /> Blocking {dependentDetails.length}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
@@ -212,9 +262,16 @@ export default function TaskList({ tasks, onSelectTask, selectedTaskIds, onSelec
                   )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`badge badge-${getStatusColor(task.status)}`}>
-                    {getStatusLabel(task.status)}
-                  </span>
+                  <div className="flex flex-col gap-1 text-sm">
+                    <span className={`badge badge-${getStatusColor(task.status)}`}>
+                      {getStatusLabel(task.status)}
+                    </span>
+                    {isBlocked && (
+                      <span className="inline-flex items-center gap-1 text-xs text-red-600">
+                        <AlertTriangle className="h-3 w-3" /> {incompleteDependencies.length} dependency pending
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   {task.file_count > 0 ? (
@@ -272,8 +329,9 @@ export default function TaskList({ tasks, onSelectTask, selectedTaskIds, onSelec
                     </button>
                   </div>
                 </td>
-              </tr>
-            ))
+                </tr>
+              )
+            })
           )}
         </tbody>
       </table>

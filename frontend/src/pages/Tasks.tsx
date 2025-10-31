@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, LayoutGrid, List, UserCheck, ClipboardCheck } from 'lucide-react'
+import { Plus, LayoutGrid, List, UserCheck, ClipboardCheck, AlertTriangle, GitBranch, GitMerge, ArrowRight } from 'lucide-react'
 import api from '../lib/api'
+import { formatDate } from '../lib/utils'
 import TaskBoard from '../components/TaskBoard'
 import TaskList from '../components/TaskList'
 import TaskModal from '../components/TaskModal'
@@ -18,6 +19,13 @@ const STATUS_FILTERS = [
   { value: 'complete', label: 'Complete' },
   { value: 'blocked', label: 'Blocked' },
 ]
+
+type TaskDependencySummary = {
+  id: number
+  name: string
+  status: string
+  due_date?: string
+}
 
 export default function Tasks() {
   const queryClient = useQueryClient()
@@ -135,6 +143,36 @@ export default function Tasks() {
     () => Array.from(new Set((tasks || []).map((t: any) => t.department).filter(Boolean))),
     [tasks]
   )
+
+  const dependencyInsights = useMemo(() => {
+    const list = Array.isArray(tasks) ? (tasks as any[]) : []
+    const dueValue = (value?: string) => {
+      if (!value) return Number.POSITIVE_INFINITY
+      const ts = new Date(value).getTime()
+      return Number.isNaN(ts) ? Number.POSITIVE_INFINITY : ts
+    }
+
+    const blocked = list
+      .filter(
+        (task) =>
+          Array.isArray(task.dependency_details) &&
+          task.dependency_details.some((dep: any) => dep.status !== 'complete')
+      )
+      .sort((a, b) => dueValue(a.due_date) - dueValue(b.due_date))
+
+    const blockers = list
+      .filter((task) => Array.isArray(task.dependent_details) && task.dependent_details.length > 0)
+      .sort((a, b) => (b.dependent_details?.length ?? 0) - (a.dependent_details?.length ?? 0))
+
+    return {
+      blocked: blocked.slice(0, 5),
+      blockers: blockers.slice(0, 5),
+    }
+  }, [tasks])
+
+  const blockedTasks = dependencyInsights.blocked
+  const topBlockingTasks = dependencyInsights.blockers
+  const hasDependencyInsights = blockedTasks.length > 0 || topBlockingTasks.length > 0
 
   useEffect(() => {
     if (!tasks) return
@@ -270,6 +308,99 @@ export default function Tasks() {
           </div>
         </div>
       </div>
+
+      {hasDependencyInsights && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="card">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-red-700 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" /> Blocked tasks
+              </h2>
+              <span className="text-xs text-red-600">{blockedTasks.length} needing attention</span>
+            </div>
+            {blockedTasks.length === 0 ? (
+              <p className="text-sm text-gray-500">No tasks are currently blocked.</p>
+            ) : (
+              <ul className="space-y-2">
+                {blockedTasks.map((taskItem: any) => {
+                  const dependencies = (taskItem.dependency_details ?? []) as TaskDependencySummary[]
+                  const openDependencies = dependencies.filter((dep) => dep.status !== 'complete')
+                  return (
+                    <li key={taskItem.id}>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTaskId(taskItem.id)}
+                        className="w-full text-left rounded-md border border-red-200 bg-red-50 px-3 py-2 transition-colors hover:bg-red-100"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-red-900">{taskItem.name}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-red-700">
+                              <span>{openDependencies.length} dependency outstanding</span>
+                              {taskItem.due_date && (
+                                <span className="inline-flex items-center gap-1 text-red-600">
+                                  <Calendar className="h-3 w-3" /> {formatDate(taskItem.due_date)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <ArrowRight className="h-4 w-4 text-red-600" />
+                        </div>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-purple-700 flex items-center gap-2">
+                <GitMerge className="w-4 h-4" /> Top blockers
+              </h2>
+              <span className="text-xs text-purple-600">
+                {topBlockingTasks.length === 0 ? 'All clear' : `${topBlockingTasks.length} upstream tasks`}
+              </span>
+            </div>
+            {topBlockingTasks.length === 0 ? (
+              <p className="text-sm text-gray-500">No downstream work is currently waiting on a single task.</p>
+            ) : (
+              <ul className="space-y-2">
+                {topBlockingTasks.map((taskItem: any) => {
+                  const dependents = (taskItem.dependent_details ?? []) as TaskDependencySummary[]
+                  return (
+                    <li key={taskItem.id}>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTaskId(taskItem.id)}
+                        className="w-full text-left rounded-md border border-purple-200 bg-purple-50 px-3 py-2 transition-colors hover:bg-purple-100"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-purple-900">{taskItem.name}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-purple-700">
+                              <span>
+                                Blocking {dependents.length} task{dependents.length === 1 ? '' : 's'}
+                              </span>
+                              {taskItem.due_date && (
+                                <span className="inline-flex items-center gap-1">
+                                  <Calendar className="h-3 w-3" /> {formatDate(taskItem.due_date)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <GitBranch className="h-4 w-4 text-purple-600" />
+                        </div>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Task view */}
       {isLoading ? (

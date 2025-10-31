@@ -33,6 +33,7 @@ from backend.schemas import (
     PriorTaskSnapshot,
     TaskFileSummary,
     TaskCommentSummary,
+    TaskSummary,
 )
 from backend.services.trial_balance_linker import auto_link_tasks_to_trial_balance_accounts
 from backend.services.notifications import NotificationService
@@ -122,6 +123,15 @@ def _map_comment_to_summary(comment: CommentModel) -> TaskCommentSummary:
     )
 
 
+def _map_task_to_summary(task: TaskModel) -> TaskSummary:
+    return TaskSummary(
+        id=task.id,
+        name=task.name,
+        status=task.status,
+        due_date=task.due_date,
+    )
+
+
 @router.get("/", response_model=List[TaskWithRelations])
 async def get_tasks(
     skip: int = 0,
@@ -170,7 +180,9 @@ async def get_tasks(
         ).count()
         
         dependency_ids = [dep.id for dep in task.dependencies]
-        
+        dependency_details = [_map_task_to_summary(dep) for dep in task.dependencies]
+        dependent_details = [_map_task_to_summary(dep) for dep in task.dependent_tasks]
+
         task_dict = {
             **task.__dict__,
             "owner": task.owner,
@@ -178,7 +190,9 @@ async def get_tasks(
             "period": task.period,
             "file_count": file_count,
             "pending_approvals": pending_approvals,
-            "dependencies": dependency_ids
+            "dependencies": dependency_ids,
+            "dependency_details": dependency_details,
+            "dependent_details": dependent_details,
         }
         result.append(task_dict)
     
@@ -215,7 +229,9 @@ async def get_my_tasks(
         ).count()
         
         dependency_ids = [dep.id for dep in task.dependencies]
-        
+        dependency_details = [_map_task_to_summary(dep) for dep in task.dependencies]
+        dependent_details = [_map_task_to_summary(dep) for dep in task.dependent_tasks]
+
         task_dict = {
             **task.__dict__,
             "owner": task.owner,
@@ -223,7 +239,9 @@ async def get_my_tasks(
             "period": task.period,
             "file_count": file_count,
             "pending_approvals": pending_approvals,
-            "dependencies": dependency_ids
+            "dependencies": dependency_ids,
+            "dependency_details": dependency_details,
+            "dependent_details": dependent_details,
         }
         result.append(task_dict)
     
@@ -277,6 +295,8 @@ async def get_review_queue(
         ).count()
 
         dependency_ids = [dep.id for dep in task.dependencies]
+        dependency_details = [_map_task_to_summary(dep) for dep in task.dependencies]
+        dependent_details = [_map_task_to_summary(dep) for dep in task.dependent_tasks]
 
         task_dict = {
             **task.__dict__,
@@ -285,7 +305,9 @@ async def get_review_queue(
             "period": task.period,
             "file_count": file_count,
             "pending_approvals": pending_approvals,
-            "dependencies": dependency_ids
+            "dependencies": dependency_ids,
+            "dependency_details": dependency_details,
+            "dependent_details": dependent_details,
         }
         result.append(task_dict)
 
@@ -310,7 +332,9 @@ async def get_task(
     ).count()
     
     dependency_ids = [dep.id for dep in task.dependencies]
-    
+    dependency_details = [_map_task_to_summary(dep) for dep in task.dependencies]
+    dependent_details = [_map_task_to_summary(dep) for dep in task.dependent_tasks]
+
     return {
         **task.__dict__,
         "owner": task.owner,
@@ -318,7 +342,9 @@ async def get_task(
         "period": task.period,
         "file_count": file_count,
         "pending_approvals": pending_approvals,
-        "dependencies": dependency_ids
+        "dependencies": dependency_ids,
+        "dependency_details": dependency_details,
+        "dependent_details": dependent_details,
     }
 
 

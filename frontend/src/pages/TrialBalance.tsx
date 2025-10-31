@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import clsx from 'clsx'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import {
   Upload,
@@ -9,6 +10,9 @@ import {
   Download,
   Sparkles,
   ShieldAlert,
+  SlidersHorizontal,
+  BookmarkPlus,
+  Trash2,
 } from 'lucide-react'
 import api from '../lib/api'
 import { formatDate } from '../lib/utils'
@@ -106,6 +110,38 @@ type TrialBalanceTableRow = {
   comparison?: TrialBalanceComparisonAccount
 }
 
+interface SmartFilterState {
+  unlinked: boolean
+  needsValidation: boolean
+  variance: boolean
+  varianceThreshold: number
+  highValue: boolean
+  highValueThreshold: number
+  newAccounts: boolean
+}
+
+type SavedFilterMap = Record<string, SmartFilterState>
+
+type FilterToggleKey = 'unlinked' | 'needsValidation' | 'variance' | 'highValue' | 'newAccounts'
+
+const DEFAULT_FILTER_STATE: SmartFilterState = {
+  unlinked: false,
+  needsValidation: false,
+  variance: false,
+  varianceThreshold: 0,
+  highValue: false,
+  highValueThreshold: 100000,
+  newAccounts: false,
+}
+
+const SMART_FILTER_BUTTONS: Array<{ key: FilterToggleKey; label: string }> = [
+  { key: 'unlinked', label: 'Unlinked tasks' },
+  { key: 'needsValidation', label: 'Needs validation' },
+  { key: 'variance', label: 'Variance ≠ 0' },
+  { key: 'highValue', label: 'High value' },
+  { key: 'newAccounts', label: 'New accounts' },
+]
+
 function formatCurrency(value?: number | null) {
   if (value === undefined || value === null) return '-' 
   return new Intl.NumberFormat('en-US', {
@@ -124,6 +160,88 @@ export default function TrialBalance() {
   const [importSummary, setImportSummary] = useState<TrialBalanceSummaryResponse | null>(null)
   const [activeAccountId, setActiveAccountId] = useState<number | null>(null)
   const showAccountModal = activeAccountId !== null
+  const [filterState, setFilterState] = useState<SmartFilterState>(DEFAULT_FILTER_STATE)
+  const [savedFilters, setSavedFilters] = useState<SavedFilterMap>({})
+  const [newFilterName, setNewFilterName] = useState('')
+  const [activeSavedFilter, setActiveSavedFilter] = useState<string | null>(null)
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('tb-saved-filters')
+      if (stored) {
+        const parsed = JSON.parse(stored) as SavedFilterMap
+        setSavedFilters(parsed)
+      }
+    } catch (error) {
+      console.warn('Unable to parse saved trial balance filters', error)
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('tb-saved-filters', JSON.stringify(savedFilters))
+    } catch (error) {
+      console.warn('Unable to persist trial balance filters', error)
+    }
+  }, [savedFilters])
+
+  const toggleBooleanFilter = (key: FilterToggleKey) => {
+    setFilterState((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }))
+    setActiveSavedFilter(null)
+  }
+
+  const updateVarianceThreshold = (value: number) => {
+    setFilterState((prev) => ({
+      ...prev,
+      varianceThreshold: Number.isNaN(value) ? prev.varianceThreshold : Math.max(0, value),
+    }))
+    setActiveSavedFilter(null)
+  }
+
+  const updateHighValueThreshold = (value: number) => {
+    setFilterState((prev) => ({
+      ...prev,
+      highValueThreshold: Number.isNaN(value) ? prev.highValueThreshold : Math.max(0, value),
+    }))
+    setActiveSavedFilter(null)
+  }
+
+  const handleSaveFilter = () => {
+    const name = newFilterName.trim()
+    if (!name) return
+    setSavedFilters((prev) => ({
+      ...prev,
+      [name]: filterState,
+    }))
+    setActiveSavedFilter(name)
+    setNewFilterName('')
+  }
+
+  const handleApplySavedFilter = (name: string) => {
+    const saved = savedFilters[name]
+    if (!saved) return
+    setFilterState(saved)
+    setActiveSavedFilter(name)
+  }
+
+  const handleDeleteSavedFilter = (name: string) => {
+    setSavedFilters((prev) => {
+      const next = { ...prev }
+      delete next[name]
+      return next
+    })
+    if (activeSavedFilter === name) {
+      setActiveSavedFilter(null)
+    }
+  }
+
+  const handleClearFilters = () => {
+    setFilterState({ ...DEFAULT_FILTER_STATE })
+    setActiveSavedFilter(null)
+  }
 
   const periodsQuery = useQuery({
     queryKey: ['periods'],
@@ -283,6 +401,79 @@ export default function TrialBalance() {
       comparison: comparisonMap.get(accountNumber) || undefined,
     }))
   }, [accountNumbers, currentAccountMap, comparisonMap])
+
+  const savedFilterNames = useMemo(() => Object.keys(savedFilters).sort(), [savedFilters])
+
+  const isFilterActive = useMemo(
+    () =>
+      filterState.unlinked ||
+      filterState.needsValidation ||
+      filterState.variance ||
+      filterState.highValue ||
+      filterState.newAccounts,
+    [filterState]
+  )
+
+  const filteredRows: TrialBalanceTableRow[] = useMemo(() => {
+    return tableRows.filter((row) => {
+      const currentAccount = row.current
+      const comparisonAccount = row.comparison
+
+      if (filterState.unlinked) {
+        if (!currentAccount || currentAccount.tasks.length > 0) return false
+      }
+
+      if (filterState.needsValidation) {
+        if (!currentAccount || currentAccount.is_verified) return false
+      }
+
+      if (filterState.newAccounts) {
+        if (!currentAccount) return false
+        const hasPrior = Boolean(
+          comparisonAccount && comparisonAccount.previous_account_id
+        )
+        if (hasPrior) return false
+      }
+
+      if (filterState.variance) {
+        const deltaValue = comparisonAccount?.delta
+        const numericDelta =
+          typeof deltaValue === 'number'
+            ? deltaValue
+            : deltaValue !== null && deltaValue !== undefined
+              ? Number(deltaValue)
+              : null
+        if (numericDelta === null || Number.isNaN(numericDelta)) return false
+        if (Math.abs(numericDelta) < filterState.varianceThreshold) return false
+      }
+
+      if (filterState.highValue) {
+        const balanceValue = currentAccount?.ending_balance ?? comparisonAccount?.current_balance ?? null
+        const numericBalance =
+          typeof balanceValue === 'number'
+            ? balanceValue
+            : balanceValue !== null && balanceValue !== undefined
+              ? Number(balanceValue)
+              : null
+        if (numericBalance === null || Number.isNaN(numericBalance)) return false
+        if (Math.abs(numericBalance) < filterState.highValueThreshold) return false
+      }
+
+      return true
+    })
+  }, [tableRows, filterState])
+
+  const activeFilterCount = useMemo(
+    () =>
+      [
+        filterState.unlinked,
+        filterState.needsValidation,
+        filterState.variance,
+        filterState.highValue,
+        filterState.newAccounts,
+      ].filter(Boolean).length,
+    [filterState]
+  )
 
   const whatsNewMetrics = useMemo(() => {
     const newAccounts = tableRows.filter(
@@ -608,7 +799,10 @@ export default function TrialBalance() {
             <div className="card p-0 overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Accounts ({tableRows.length})</h2>
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    Accounts ({filteredRows.length}
+                    {filteredRows.length !== tableRows.length ? ` of ${tableRows.length}` : ''})
+                  </h2>
                   <p className="text-sm text-gray-500">Review balances and link supporting tasks.</p>
                   {comparison?.previous_period_id && (
                     <p className="text-xs text-gray-500 mt-1">
@@ -617,6 +811,123 @@ export default function TrialBalance() {
                   )}
                   {comparisonQuery.isLoading && (
                     <p className="text-xs text-gray-400 mt-1">Loading comparison data…</p>
+                  )}
+                  {isFilterActive && (
+                    <p className="text-xs text-primary-600 mt-1">
+                      {activeFilterCount} smart filter{activeFilterCount === 1 ? '' : 's'} applied
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="px-6 py-3 border-b border-gray-100 bg-gray-50 space-y-3">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="inline-flex items-center gap-2 text-xs uppercase tracking-wide text-gray-500">
+                    <SlidersHorizontal className="h-3.5 w-3.5" /> Smart filters
+                  </span>
+                  {SMART_FILTER_BUTTONS.map((filterButton) => (
+                    <button
+                      key={filterButton.key}
+                      type="button"
+                      className={clsx(
+                        'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                        filterState[filterButton.key]
+                          ? 'border-primary-400 bg-primary-50 text-primary-700'
+                          : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-100'
+                      )}
+                      onClick={() => toggleBooleanFilter(filterButton.key)}
+                    >
+                      {filterButton.label}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="text-xs text-gray-500 underline-offset-2 hover:underline"
+                    onClick={handleClearFilters}
+                    disabled={!isFilterActive}
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                {(filterState.highValue || filterState.variance) && (
+                  <div className="flex flex-wrap items-center gap-4 text-xs text-gray-600">
+                    {filterState.highValue && (
+                      <label className="flex items-center gap-2">
+                        <span>High value ≥</span>
+                        <input
+                          type="number"
+                          min={0}
+                          className="input h-8 w-24 text-xs"
+                          value={filterState.highValueThreshold}
+                          onChange={(event) => updateHighValueThreshold(Number(event.target.value))}
+                        />
+                      </label>
+                    )}
+                    {filterState.variance && (
+                      <label className="flex items-center gap-2">
+                        <span>Variance ≥</span>
+                        <input
+                          type="number"
+                          min={0}
+                          className="input h-8 w-24 text-xs"
+                          value={filterState.varianceThreshold}
+                          onChange={(event) => updateVarianceThreshold(Number(event.target.value))}
+                        />
+                      </label>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      className="input h-8 text-xs"
+                      placeholder="Save current filters as…"
+                      value={newFilterName}
+                      onChange={(event) => setNewFilterName(event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="btn-secondary text-xs flex items-center gap-1"
+                      onClick={handleSaveFilter}
+                      disabled={!newFilterName.trim()}
+                    >
+                      <BookmarkPlus className="h-3.5 w-3.5" /> Save filter
+                    </button>
+                  </div>
+                  {savedFilterNames.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="input h-8 text-xs"
+                        value={activeSavedFilter ?? ''}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          if (!value) {
+                            setActiveSavedFilter(null)
+                            return
+                          }
+                          handleApplySavedFilter(value)
+                        }}
+                      >
+                        <option value="">Saved filters…</option>
+                        {savedFilterNames.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                      {activeSavedFilter && (
+                        <button
+                          type="button"
+                          className="text-xs text-red-600 inline-flex items-center gap-1"
+                          onClick={() => handleDeleteSavedFilter(activeSavedFilter)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" /> Delete
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
@@ -658,7 +969,16 @@ export default function TrialBalance() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {tableRows.map((row) => {
+                    {filteredRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} className="px-6 py-8 text-center text-gray-500">
+                          {tableRows.length === 0
+                            ? 'No trial balance accounts available yet.'
+                            : 'No accounts match the current filters.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredRows.map((row) => {
                       const currentAccount = row.current
                       const comparisonAccount = row.comparison
                       const accountName = currentAccount?.account_name || comparisonAccount?.account_name || row.accountNumber
@@ -677,7 +997,7 @@ export default function TrialBalance() {
                             ? 'text-red-600'
                             : 'text-gray-600'
 
-                      return (
+                        return (
                         <tr key={`${accountNumber}-${currentAccount?.id ?? 'prior'}`} className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="font-medium text-gray-900">{accountName}</div>
@@ -735,7 +1055,8 @@ export default function TrialBalance() {
                           </td>
                         </tr>
                       )
-                    })}
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>

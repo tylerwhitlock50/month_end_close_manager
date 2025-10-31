@@ -11,6 +11,7 @@ This file tests the remaining routers:
 """
 
 import pytest
+from decimal import Decimal
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -22,6 +23,9 @@ from backend.models import (
     Comment as CommentModel,
     Notification as NotificationModel,
     TaskTemplate as TaskTemplateModel,
+    TrialBalance as TrialBalanceModel,
+    TrialBalanceAccount as TrialBalanceAccountModel,
+    TaskStatus,
     CloseType
 )
 
@@ -329,4 +333,56 @@ class TestTrialBalance:
         response = client.get("/api/trial-balance/period/99999")
         
         assert response.status_code == 404
+
+    def test_create_task_from_trial_balance_account(
+        self,
+        client: TestClient,
+        db_session: Session,
+        sample_period: PeriodModel,
+        sample_user: UserModel,
+    ):
+        trial_balance = TrialBalanceModel(
+            period_id=sample_period.id,
+            name="January TB",
+            source_filename="tb.csv",
+            stored_filename="tb.csv",
+            file_path="/tmp/tb.csv",
+            uploaded_by_id=sample_user.id,
+        )
+        db_session.add(trial_balance)
+        db_session.flush()
+
+        account = TrialBalanceAccountModel(
+            trial_balance_id=trial_balance.id,
+            account_number="1000",
+            account_name="Cash",
+            ending_balance=Decimal("1250.00"),
+        )
+        db_session.add(account)
+        db_session.commit()
+
+        payload = {
+            "name": "Reconcile Cash",
+            "description": "Prepare monthly reconciliation",
+            "owner_id": sample_user.id,
+            "status": TaskStatus.IN_PROGRESS.value,
+            "priority": 6,
+            "save_as_template": True,
+            "template_name": "Cash Reconciliation"
+        }
+
+        response = client.post(
+            f"/api/trial-balance/accounts/{account.id}/tasks",
+            json=payload,
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["name"] == "Reconcile Cash"
+        assert data["owner"]["id"] == sample_user.id
+        assert data["dependencies"] == []
+
+        db_session.refresh(account)
+        assert len(account.tasks) == 1
+        assert account.tasks[0].template_id is not None
 
