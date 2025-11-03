@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import Field
 from typing import List
 import os
 
@@ -39,9 +40,10 @@ class Settings(BaseSettings):
     # Timezone
     tz: str = "America/New_York"
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = {
+        "env_file": ".env",
+        "case_sensitive": False,
+    }
     
     @property
     def origins_list(self) -> List[str]:

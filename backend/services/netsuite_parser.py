@@ -178,6 +178,9 @@ def parse_netsuite_trial_balance(content: str) -> NetSuiteTrialBalanceResult:
     total_debit: Optional[Decimal] = Decimal("0") if debit_col else None
     total_credit: Optional[Decimal] = Decimal("0") if credit_col else None
     total_balance: Optional[Decimal] = Decimal("0") if balance_col else Decimal("0")
+    reported_total_debit: Optional[Decimal] = None
+    reported_total_credit: Optional[Decimal] = None
+    reported_total_balance: Optional[Decimal] = None
 
     # Skip header row for the DictReader by advancing once
     next(dict_reader, None)
@@ -188,7 +191,15 @@ def parse_netsuite_trial_balance(content: str) -> NetSuiteTrialBalanceResult:
             continue
 
         lowered = account_raw.lower()
-        if lowered.startswith(TOTAL_PREFIX):
+        normalized_account = lowered.replace(":", "").strip()
+
+        if normalized_account == "total":
+            reported_total_debit = _parse_decimal(row.get(debit_col)) if debit_col else None
+            reported_total_credit = _parse_decimal(row.get(credit_col)) if credit_col else None
+            reported_total_balance = _parse_decimal(row.get(balance_col)) if balance_col else None
+            continue
+
+        if lowered.startswith(TOTAL_PREFIX) or (normalized_account.startswith("total") and "-" not in account_raw):
             # Subtotal rows should be ignored
             continue
 
@@ -234,6 +245,18 @@ def parse_netsuite_trial_balance(content: str) -> NetSuiteTrialBalanceResult:
             total_balance += balance_value
 
     metadata = _extract_metadata(all_lines[:header_index])
+
+    def _compare_totals(label: str, reported: Optional[Decimal], computed: Optional[Decimal]) -> None:
+        if reported is None or computed is None:
+            return
+        if reported != computed:
+            warnings.append(
+                f"NetSuite reported total {label} {reported} but calculated total is {computed}"
+            )
+
+    _compare_totals("debit", reported_total_debit, total_debit)
+    _compare_totals("credit", reported_total_credit, total_credit)
+    _compare_totals("balance", reported_total_balance, total_balance)
 
     return NetSuiteTrialBalanceResult(
         accounts=accounts,

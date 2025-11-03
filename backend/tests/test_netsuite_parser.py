@@ -49,6 +49,14 @@ def test_parser_skips_totals_and_headers(sample_netsuite_csv):
     assert "10000" not in {account.account_number for account in result.accounts}
 
 
+def test_parser_excludes_overall_total_row(sample_netsuite_csv):
+    result = parse_netsuite_trial_balance(sample_netsuite_csv)
+
+    # A trailing "Total" row should be ignored and used only for reconciliation
+    assert all(account.account_name.lower() != "total" for account in result.accounts)
+    assert result.warnings == []
+
+
 def test_parser_surfaces_metadata(sample_netsuite_csv):
     result = parse_netsuite_trial_balance(sample_netsuite_csv)
 

@@ -298,6 +298,40 @@ def _get_latest_trial_balance(db: Session, period_id: int) -> Optional[TrialBala
     )
 
 
+def _delete_existing_trial_balance_files(db: Session, *, period_id: int) -> None:
+    db.query(FileModel).filter(
+        FileModel.period_id == period_id,
+        FileModel.description.ilike("Trial balance import%")
+    ).delete(synchronize_session=False)
+
+
+def _record_trial_balance_upload(
+    db: Session,
+    *,
+    period_id: int,
+    trial_balance: TrialBalanceModel,
+    original_filename: str,
+    stored_filename: str,
+    file_path: str,
+    file_size: int,
+    mime_type: Optional[str],
+    uploaded_by_id: Optional[int]
+) -> None:
+    description = f"Trial balance import (TB #{trial_balance.id})"
+    file_record = FileModel(
+        period_id=period_id,
+        filename=stored_filename,
+        original_filename=original_filename,
+        file_path=file_path,
+        file_size=file_size,
+        mime_type=mime_type,
+        description=description,
+        uploaded_by_id=uploaded_by_id,
+        is_external_link=False,
+    )
+    db.add(file_record)
+
+
 @router.get("/template")
 async def download_trial_balance_template(
     current_user: UserModel = Depends(get_current_user)
@@ -357,6 +391,8 @@ async def import_trial_balance(
         decoded = raw_bytes.decode("utf-8-sig")
     except UnicodeDecodeError:
         decoded = raw_bytes.decode("latin-1")
+
+    file_size = len(raw_bytes)
 
     csv_stream = io.StringIO(decoded)
     reader = csv.DictReader(csv_stream)
@@ -426,6 +462,7 @@ async def import_trial_balance(
 
     if replace_existing:
         existing = db.query(TrialBalanceModel).filter(TrialBalanceModel.period_id == period_id).all()
+        _delete_existing_trial_balance_files(db, period_id=period_id)
         for tb in existing:
             db.delete(tb)
         db.commit()
@@ -447,6 +484,18 @@ async def import_trial_balance(
     stored_filename, file_path = _store_import_file(trial_balance.id, file.filename or "trial_balance.csv", raw_bytes)
     trial_balance.stored_filename = stored_filename
     trial_balance.file_path = file_path
+
+    _record_trial_balance_upload(
+        db,
+        period_id=period_id,
+        trial_balance=trial_balance,
+        original_filename=file.filename or "trial_balance.csv",
+        stored_filename=stored_filename,
+        file_path=file_path,
+        file_size=file_size,
+        mime_type=file.content_type or "text/csv",
+        uploaded_by_id=current_user.id if current_user else None,
+    )
 
     created_accounts = []
 
@@ -510,6 +559,8 @@ async def import_trial_balance_netsuite(
     except UnicodeDecodeError:
         decoded = raw_bytes.decode("latin-1")
 
+    file_size = len(raw_bytes)
+
     try:
         parsed = parse_netsuite_trial_balance(decoded)
     except ValueError as exc:
@@ -520,6 +571,7 @@ async def import_trial_balance_netsuite(
 
     if replace_existing:
         existing = db.query(TrialBalanceModel).filter(TrialBalanceModel.period_id == period_id).all()
+        _delete_existing_trial_balance_files(db, period_id=period_id)
         for tb in existing:
             db.delete(tb)
         db.commit()
@@ -546,6 +598,18 @@ async def import_trial_balance_netsuite(
     )
     trial_balance.stored_filename = stored_filename
     trial_balance.file_path = file_path
+
+    _record_trial_balance_upload(
+        db,
+        period_id=period_id,
+        trial_balance=trial_balance,
+        original_filename=file.filename or "netsuite_trial_balance.csv",
+        stored_filename=stored_filename,
+        file_path=file_path,
+        file_size=file_size,
+        mime_type=file.content_type or "text/csv",
+        uploaded_by_id=current_user.id if current_user else None,
+    )
 
     account_models: list[TrialBalanceAccountModel] = []
 
@@ -788,6 +852,20 @@ async def create_account_task(
         if not assignee:
             raise HTTPException(status_code=404, detail="Assignee not found")
 
+    base_department = payload.department or payload.template_department
+    if base_department:
+        normalized_department = base_department.strip() or "Accounting"
+    elif payload.save_as_template:
+        normalized_department = "Accounting"
+    else:
+        normalized_department = (account.account_type or "Accounting").strip() or "Accounting"
+
+    template_estimated_hours = payload.template_estimated_hours
+    if template_estimated_hours is None and payload.save_as_template:
+        template_estimated_hours = 0.25
+
+    estimated_hours = template_estimated_hours
+
     new_task = TaskModel(
         period_id=period.id,
         name=payload.name,
@@ -797,7 +875,8 @@ async def create_account_task(
         status=payload.status,
         due_date=payload.due_date,
         priority=payload.priority if payload.priority is not None else 5,
-        department=payload.department or account.account_type,
+        department=normalized_department,
+        estimated_hours=estimated_hours,
     )
 
     db.add(new_task)
@@ -805,13 +884,25 @@ async def create_account_task(
     db.flush()
 
     if payload.save_as_template:
+        default_account_numbers = [
+            value.strip()
+            for value in (payload.template_default_account_numbers or [])
+            if value and value.strip()
+        ]
+        if account.account_number:
+            account_number_clean = account.account_number.strip()
+            if account_number_clean and account_number_clean not in default_account_numbers:
+                default_account_numbers.append(account_number_clean)
+
         template = TaskTemplateModel(
             name=payload.template_name or payload.name,
             description=payload.description,
             close_type=period.close_type,
             default_owner_id=payload.owner_id,
-            department=payload.department or account.account_type,
+            department=payload.template_department or normalized_department,
             days_offset=_calculate_template_offset(period, payload.due_date),
+            estimated_hours=template_estimated_hours if template_estimated_hours is not None else 0.25,
+            default_account_numbers=default_account_numbers,
         )
         db.add(template)
         db.flush()

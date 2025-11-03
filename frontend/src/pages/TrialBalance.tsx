@@ -15,6 +15,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import api from '../lib/api'
+import { usePeriodStore } from '../stores/periodStore'
 import { formatDate } from '../lib/utils'
 import TrialBalanceAccountModal from '../components/TrialBalanceAccountModal'
 
@@ -153,6 +154,7 @@ function formatCurrency(value?: number | null) {
 
 export default function TrialBalance() {
   const [selectedPeriodId, setSelectedPeriodId] = useState<number | ''>('')
+  const { selectedPeriodId: globalPeriodId, setPeriod } = usePeriodStore()
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [replaceExisting, setReplaceExisting] = useState(false)
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
@@ -184,6 +186,18 @@ export default function TrialBalance() {
       console.warn('Unable to persist trial balance filters', error)
     }
   }, [savedFilters])
+
+  useEffect(() => {
+    const localId = typeof selectedPeriodId === 'number' ? selectedPeriodId : null
+
+    if (globalPeriodId !== null && globalPeriodId !== localId) {
+      setSelectedPeriodId(globalPeriodId)
+    }
+
+    if (globalPeriodId === null && localId !== null) {
+      setSelectedPeriodId('')
+    }
+  }, [globalPeriodId, selectedPeriodId])
 
   const toggleBooleanFilter = (key: FilterToggleKey) => {
     setFilterState((prev) => ({
@@ -577,7 +591,14 @@ export default function TrialBalance() {
               value={selectedPeriodId}
               onChange={(event) => {
                 const value = event.target.value
-                setSelectedPeriodId(value ? Number(value) : '')
+                const nextValue = value ? Number(value) : ''
+                setSelectedPeriodId(nextValue)
+                if (value) {
+                  const period = periodsQuery.data?.find((item) => item.id === Number(value))
+                  setPeriod(Number(value), period?.name ?? null)
+                } else {
+                  setPeriod(null)
+                }
                 setFeedback(null)
                 setImportSummary(null)
               }}

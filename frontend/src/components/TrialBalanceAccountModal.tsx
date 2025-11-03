@@ -129,6 +129,12 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
   const [newTaskPriority, setNewTaskPriority] = useState<number>(5)
   const [saveAsTemplate, setSaveAsTemplate] = useState(false)
   const [templateName, setTemplateName] = useState(`${account.account_name} Task Template`)
+  const [templateNameTouched, setTemplateNameTouched] = useState(false)
+  const [templateDepartment, setTemplateDepartment] = useState('Accounting')
+  const [templateEstimatedHours, setTemplateEstimatedHours] = useState('0.25')
+  const [templateAccountNumbers, setTemplateAccountNumbers] = useState(
+    account.account_number ? account.account_number : ''
+  )
   const [createTaskError, setCreateTaskError] = useState('')
 
   useEffect(() => {
@@ -150,8 +156,27 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
     setNewTaskPriority(5)
     setSaveAsTemplate(false)
     setTemplateName(`${account.account_name} Task Template`)
+    setTemplateNameTouched(false)
+    setTemplateDepartment('Accounting')
+    setTemplateEstimatedHours('0.25')
+    setTemplateAccountNumbers(account.account_number ? account.account_number : '')
     setCreateTaskError('')
   }, [account])
+
+  useEffect(() => {
+    if (!templateNameTouched) {
+      setTemplateName(newTaskName)
+    }
+  }, [newTaskName, templateNameTouched])
+
+  useEffect(() => {
+    if (saveAsTemplate && !templateAccountNumbers && account.account_number) {
+      setTemplateAccountNumbers(account.account_number)
+    }
+    if (!saveAsTemplate) {
+      setTemplateNameTouched(false)
+    }
+  }, [saveAsTemplate, account.account_number, templateAccountNumbers])
 
   const tasksQuery = useQuery({
     queryKey: ['tasks', periodId],
@@ -259,6 +284,9 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
       department?: string
       save_as_template?: boolean
       template_name?: string
+      template_department?: string
+      template_estimated_hours?: number
+      template_default_account_numbers?: string[]
     }) => {
       const response = await api.post(`/api/trial-balance/accounts/${account.id}/tasks`, payload)
       return response.data as TaskOption
@@ -275,6 +303,10 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
       setNewTaskPriority(5)
       setSaveAsTemplate(false)
       setTemplateName(`${account.account_name} Task Template`)
+      setTemplateNameTouched(false)
+      setTemplateDepartment('Accounting')
+      setTemplateEstimatedHours('0.25')
+      setTemplateAccountNumbers(account.account_number ? account.account_number : '')
       onRefetch()
       tasksQuery.refetch()
     },
@@ -414,6 +446,14 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
       return
     }
 
+    const normalizedTemplateDepartment = templateDepartment.trim() || 'Accounting'
+    const estimatedHoursValue = Number(templateEstimatedHours)
+    const normalizedEstimatedHours = Number.isNaN(estimatedHoursValue) ? 0.25 : Math.max(0, estimatedHoursValue)
+    const normalizedAccountNumbers = templateAccountNumbers
+      .split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0)
+
     const payload: {
       name: string
       description?: string
@@ -425,10 +465,14 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
       department?: string
       save_as_template?: boolean
       template_name?: string
+      template_department?: string
+      template_estimated_hours?: number
+      template_default_account_numbers?: string[]
     } = {
       name: newTaskName.trim(),
       owner_id: Number(newTaskOwnerId),
       status: newTaskStatus,
+      department: normalizedTemplateDepartment,
     }
 
     if (newTaskDescription.trim()) {
@@ -446,12 +490,16 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
     if (newTaskPriority) {
       payload.priority = newTaskPriority
     }
-    if (account.account_type) {
-      payload.department = account.account_type
-    }
     if (saveAsTemplate) {
       payload.save_as_template = true
       payload.template_name = (templateName || newTaskName).trim()
+      payload.template_department = normalizedTemplateDepartment
+      payload.template_estimated_hours = normalizedEstimatedHours
+      if (normalizedAccountNumbers.length > 0) {
+        payload.template_default_account_numbers = normalizedAccountNumbers
+      }
+    } else if (!payload.department && account.account_type) {
+      payload.department = account.account_type
     }
 
     setCreateTaskError('')
@@ -634,22 +682,68 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
               />
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="space-y-3">
               <label className="inline-flex items-center gap-2 text-sm text-gray-700">
                 <input
                   type="checkbox"
                   checked={saveAsTemplate}
-                  onChange={(event) => setSaveAsTemplate(event.target.checked)}
+                  onChange={(event) => {
+                    const checked = event.target.checked
+                    setSaveAsTemplate(checked)
+                    if (checked) {
+                      setTemplateNameTouched(false)
+                    }
+                  }}
                 />
                 Save as template for future periods
               </label>
               {saveAsTemplate && (
-                <input
-                  className="input text-sm"
-                  value={templateName}
-                  onChange={(event) => setTemplateName(event.target.value)}
-                  placeholder="Template name"
-                />
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="label text-sm">Template name</label>
+                    <input
+                      className="input text-sm"
+                      value={templateName}
+                      onChange={(event) => {
+                        setTemplateName(event.target.value)
+                        setTemplateNameTouched(true)
+                      }}
+                      placeholder="Template name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="label text-sm">Estimated hours</label>
+                    <input
+                      type="number"
+                      step="0.25"
+                      min="0"
+                      className="input text-sm"
+                      value={templateEstimatedHours}
+                      onChange={(event) => setTemplateEstimatedHours(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="label text-sm">Department</label>
+                    <input
+                      className="input text-sm"
+                      value={templateDepartment}
+                      onChange={(event) => setTemplateDepartment(event.target.value)}
+                      placeholder="e.g., Accounting"
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-3">
+                    <label className="label text-sm">Account tags</label>
+                    <input
+                      className="input text-sm"
+                      value={templateAccountNumbers}
+                      onChange={(event) => setTemplateAccountNumbers(event.target.value)}
+                      placeholder="Comma-separated account numbers or keywords"
+                    />
+                    <p className="text-xs text-gray-500">
+                      Defaults to this account number so new tasks auto-link to the right balance.
+                    </p>
+                  </div>
+                </div>
               )}
             </div>
 

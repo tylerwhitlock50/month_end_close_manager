@@ -385,4 +385,13 @@ class TestTrialBalance:
         db_session.refresh(account)
         assert len(account.tasks) == 1
         assert account.tasks[0].template_id is not None
+        assert account.tasks[0].department == "Accounting"
+        assert account.tasks[0].estimated_hours == pytest.approx(0.25)
 
+        template = db_session.query(TaskTemplateModel).filter(
+            TaskTemplateModel.id == account.tasks[0].template_id
+        ).first()
+        assert template is not None
+        assert template.department == "Accounting"
+        assert template.estimated_hours == pytest.approx(0.25)
+        assert template.default_account_numbers == ["1000"]

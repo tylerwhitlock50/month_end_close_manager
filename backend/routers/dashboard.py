@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -57,19 +57,30 @@ async def get_dashboard_stats(
     completed_tasks = sum(1 for t in tasks if t.status == TaskStatus.COMPLETE)
     in_progress_tasks = sum(1 for t in tasks if t.status == TaskStatus.IN_PROGRESS)
     
-    # Calculate overdue tasks
-    now = datetime.utcnow()
+    # Calculate overdue tasks using a single timezone-aware reference
+    now_utc = datetime.now(timezone.utc)
+    far_future = now_utc + timedelta(days=3650)
+
+    def ensure_aware(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
     overdue_tasks = sum(
-        1 for t in tasks 
-        if t.due_date and t.due_date < now and t.status != TaskStatus.COMPLETE
+        1
+        for t in tasks
+        if (due_date := ensure_aware(t.due_date)) and due_date < now_utc and t.status != TaskStatus.COMPLETE
     )
     
     # Tasks due today
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
     tasks_due_today = sum(
-        1 for t in tasks 
-        if t.due_date and today_start <= t.due_date < today_end and t.status != TaskStatus.COMPLETE
+        1
+        for t in tasks
+        if (due_date := ensure_aware(t.due_date)) and today_start <= due_date < today_end and t.status != TaskStatus.COMPLETE
     )
     
     # Calculate completion percentage
@@ -84,7 +95,9 @@ async def get_dashboard_stats(
     avg_time_to_complete = None
     if completed_with_times:
         total_hours = sum(
-            (t.completed_at - t.started_at).total_seconds() / 3600 
+            (
+                (ensure_aware(t.completed_at) - ensure_aware(t.started_at)).total_seconds() / 3600
+            )
             for t in completed_with_times
         )
         avg_time_to_complete = total_hours / len(completed_with_times)
@@ -95,16 +108,21 @@ async def get_dashboard_stats(
     blocked_tasks = [to_summary(t) for t in tasks if t.status == TaskStatus.BLOCKED]
     review_tasks = [to_summary(t) for t in tasks if t.status == TaskStatus.REVIEW]
 
-    at_risk_deadline = datetime.utcnow() + timedelta(days=2)
+    at_risk_deadline = now_utc + timedelta(days=2)
     at_risk_tasks = [
         to_summary(t)
         for t in tasks
-        if t.status != TaskStatus.COMPLETE and t.due_date and t.due_date <= at_risk_deadline
+        if t.status != TaskStatus.COMPLETE
+        and (due_date := ensure_aware(t.due_date))
+        and due_date <= at_risk_deadline
     ]
 
-    blocked_tasks.sort(key=lambda item: item.due_date or datetime.max)
-    review_tasks.sort(key=lambda item: item.due_date or datetime.max)
-    at_risk_tasks.sort(key=lambda item: item.due_date or datetime.max)
+    def summary_sort_key(summary: TaskSummary) -> datetime:
+        return ensure_aware(summary.due_date) or far_future
+
+    blocked_tasks.sort(key=summary_sort_key)
+    review_tasks.sort(key=summary_sort_key)
+    at_risk_tasks.sort(key=summary_sort_key)
 
     critical_path_items: List[CriticalPathItem] = []
     task_ids = [task.id for task in tasks]
@@ -141,7 +159,7 @@ async def get_dashboard_stats(
             )
 
         if dependents_by_blocker:
-            now = datetime.utcnow()
+            reference_now = now_utc
             candidates: List[Tuple[TaskModel, List[TaskSummary], int, int]] = []
 
             for task in tasks:
@@ -152,16 +170,17 @@ async def get_dashboard_stats(
                 if task.status == TaskStatus.COMPLETE:
                     continue
 
-                dependents.sort(key=lambda item: item.due_date or datetime.max)
+                dependents.sort(key=summary_sort_key)
                 blocked_count = len(dependents)
-                overdue_flag = 0 if task.due_date and task.due_date < now else 1
+                task_due = ensure_aware(task.due_date)
+                overdue_flag = 0 if task_due and task_due < reference_now else 1
 
                 candidates.append((task, dependents, blocked_count, overdue_flag))
 
             candidates.sort(
                 key=lambda item: (
                     item[3],
-                    item[0].due_date or datetime.max,
+                    ensure_aware(item[0].due_date) or far_future,
                     -item[2],
                 )
             )

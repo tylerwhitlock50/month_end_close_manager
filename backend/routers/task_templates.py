@@ -58,6 +58,69 @@ async def create_task_template(
     return template
 
 
+# Workflow Builder Endpoints
+
+
+@router.get("/workflow", response_model=WorkflowResponse)
+async def get_template_workflow(
+    close_type: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Get all task templates as workflow nodes with computed edges."""
+    try:
+        query = db.query(TaskTemplateModel).filter(TaskTemplateModel.is_active == True)
+        
+        if close_type:
+            normalized_close_type = close_type.strip().lower()
+            close_type_enum = None
+            try:
+                close_type_enum = CloseType(normalized_close_type)
+            except ValueError:
+                close_type_enum = None
+
+            if close_type_enum:
+                query = query.filter(TaskTemplateModel.close_type == close_type_enum)
+        
+        templates = query.order_by(TaskTemplateModel.sort_order.asc()).all()
+        
+        # Build workflow nodes
+        nodes = []
+        for template in templates:
+            dependency_ids = [dep.id for dep in template.dependencies]
+            node_data = {
+                "id": template.id,
+                "name": template.name,
+                "description": template.description,
+                "department": template.department,
+                "owner": None,
+                "assignee": None,
+                "due_date": None,
+                "priority": 5,
+                "position_x": template.position_x,
+                "position_y": template.position_y,
+                "dependency_ids": dependency_ids,
+                "status": None
+            }
+            nodes.append(node_data)
+        
+        # Compute edges from dependencies
+        edges = []
+        for template in templates:
+            for dep in template.dependencies:
+                edges.append({
+                    "id": f"{dep.id}-{template.id}",
+                    "source": dep.id,
+                    "target": template.id
+                })
+        
+        return {"nodes": nodes, "edges": edges}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{template_id}", response_model=TaskTemplate)
 async def get_task_template(
     template_id: int,
@@ -115,60 +178,6 @@ async def delete_task_template(
 
     db.delete(template)
     db.commit()
-
-
-# Workflow Builder Endpoints
-
-@router.get("/workflow")
-async def get_template_workflow(
-    close_type: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-    current_user: UserModel = Depends(get_current_user)
-):
-    """Get all task templates as workflow nodes with computed edges."""
-    try:
-        query = db.query(TaskTemplateModel).filter(TaskTemplateModel.is_active == True)
-        
-        if close_type:
-            query = query.filter(TaskTemplateModel.close_type == close_type)
-        
-        templates = query.order_by(TaskTemplateModel.sort_order.asc()).all()
-        
-        # Build workflow nodes
-        nodes = []
-        for template in templates:
-            dependency_ids = [dep.id for dep in template.dependencies]
-            node_data = {
-                "id": template.id,
-                "name": template.name,
-                "description": template.description,
-                "department": template.department,
-                "owner": None,
-                "assignee": None,
-                "due_date": None,
-                "priority": 5,
-                "position_x": template.position_x,
-                "position_y": template.position_y,
-                "dependency_ids": dependency_ids,
-                "status": None
-            }
-            nodes.append(node_data)
-        
-        # Compute edges from dependencies
-        edges = []
-        for template in templates:
-            for dep in template.dependencies:
-                edges.append({
-                    "id": f"{dep.id}-{template.id}",
-                    "source": dep.id,
-                    "target": template.id
-                })
-        
-        return {"nodes": nodes, "edges": edges}
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.put("/{template_id}/position")

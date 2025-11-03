@@ -6,6 +6,7 @@ from backend.models import (
     Period,
     TrialBalance,
     TrialBalanceAccount,
+    File,
     UserRole,
     PeriodStatus,
     CloseType,
@@ -67,6 +68,38 @@ def test_import_netsuite_trial_balance(client, db_session):
 
     allowance = next(account for account in accounts if account.account_number == "12090")
     assert allowance.credit == Decimal("759638.37")
+
+    period_files = (
+        db_session.query(File)
+        .filter(File.period_id == 1, File.description.ilike("Trial balance import%"))
+        .all()
+    )
+    assert len(period_files) == 1
+    assert period_files[0].original_filename == "TrialBalance677.csv"
+
+
+def test_import_trial_balance_creates_period_file(client, db_session):
+    seed_period_and_user(db_session)
+
+    csv_content = (
+        "account number,account name,debit,credit\n"
+        "1000,Cash,100.00,0\n"
+    ).encode("utf-8")
+
+    response = client.post(
+        "/api/trial-balance/1/import",
+        files={"file": ("simple_tb.csv", csv_content, "text/csv")},
+    )
+
+    assert response.status_code == 201, response.text
+
+    period_files = (
+        db_session.query(File)
+        .filter(File.period_id == 1, File.description.ilike("Trial balance import%"))
+        .all()
+    )
+    assert len(period_files) == 1
+    assert period_files[0].original_filename == "simple_tb.csv"
 
 
 def test_import_netsuite_validation_on_empty_file(client, db_session):

@@ -639,6 +639,9 @@ class TrialBalanceAccountTaskCreate(BaseModel):
     department: Optional[str] = None
     save_as_template: bool = False
     template_name: Optional[str] = None
+    template_department: Optional[str] = None
+    template_estimated_hours: Optional[float] = Field(None, ge=0)
+    template_default_account_numbers: Optional[List[str]] = None
 
 
 class TaskFileSummary(BaseModel):

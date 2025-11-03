@@ -22,6 +22,34 @@ async def get_users(
     return users
 
 
+@router.post("/", response_model=User, status_code=status.HTTP_201_CREATED)
+async def create_user(
+    payload: UserCreate,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(require_role([UserRole.ADMIN]))
+):
+    """Create a new user (admin only)."""
+    existing = db.query(UserModel).filter(UserModel.email == payload.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    user = UserModel(
+        email=payload.email,
+        name=payload.name,
+        role=payload.role,
+        department=payload.department,
+        phone=payload.phone,
+        slack_user_id=payload.slack_user_id,
+        hashed_password=get_password_hash(payload.password),
+        is_active=True,
+    )
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 @router.get("/me", response_model=User)
 async def get_current_user_info(
     current_user: UserModel = Depends(get_current_user)

@@ -26,6 +26,40 @@ def create_tables():
     print("✓ Tables created successfully")
 
 
+def create_admin_user():
+    """Create admin user only."""
+    db = SessionLocal()
+    
+    try:
+        print("\nCreating admin user...")
+        
+        admin = db.query(User).filter(User.email == "admin@monthend.com").first()
+        if not admin:
+            admin = User(
+                email="admin@monthend.com",
+                name="System Administrator",
+                hashed_password=get_password_hash("admin123"),
+                role=UserRole.ADMIN,
+                department="Finance",
+                is_active=True
+            )
+            db.add(admin)
+            db.commit()
+            print("✓ Created admin user")
+            print("\nLogin credentials:")
+            print("  Email: admin@monthend.com")
+            print("  Password: admin123")
+        else:
+            print("ℹ Admin user already exists")
+            
+    except Exception as e:
+        print(f"\n❌ Error creating admin user: {str(e)}")
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def seed_data():
     """Seed database with initial data."""
     db = SessionLocal()
@@ -283,6 +317,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Initialize database")
     parser.add_argument("--reset", action="store_true", help="Reset database (drop all tables)")
     parser.add_argument("--seed", action="store_true", help="Seed with sample data")
+    parser.add_argument("--admin", action="store_true", help="Create admin user only")
     
     args = parser.parse_args()
     
@@ -293,4 +328,6 @@ if __name__ == "__main__":
     
     if args.seed:
         seed_data()
+    elif args.admin:
+        create_admin_user()
 

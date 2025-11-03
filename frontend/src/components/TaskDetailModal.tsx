@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -283,6 +283,48 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
       setUploading(false)
     }
   }
+
+  const handleClipboardPaste = useCallback(
+    (event: ClipboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return
+      }
+
+      const items = event.clipboardData?.items
+      if (!items) {
+        return
+      }
+
+      for (const item of items) {
+        if (item.kind !== 'file' || !item.type.startsWith('image/')) {
+          continue
+        }
+
+        const blob = item.getAsFile()
+        if (!blob) {
+          continue
+        }
+
+        const extension = item.type === 'image/png' ? 'png' : item.type === 'image/jpeg' ? 'jpg' : 'png'
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+        const filename = `pasted-screenshot-${timestamp}.${extension}`
+        const screenshotFile = new File([blob], filename, { type: item.type || 'image/png' })
+
+        handleFileUpload(screenshotFile)
+        event.preventDefault()
+        break
+      }
+    },
+    [handleFileUpload]
+  )
+
+  useEffect(() => {
+    window.addEventListener('paste', handleClipboardPaste)
+    return () => {
+      window.removeEventListener('paste', handleClipboardPaste)
+    }
+  }, [handleClipboardPaste])
 
   const addCommentMutation = useMutation({
     mutationFn: async () => {
@@ -614,6 +656,9 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
                     value={supportFileDate}
                     onChange={(event) => setSupportFileDate(event.target.value)}
                   />
+                  <p className="text-xs text-gray-500">
+                    Tip: paste a screenshot with <span className="font-medium">Ctrl/⌘ + V</span> to upload instantly.
+                  </p>
                   {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
                   {uploading && (
                     <p className="text-xs text-gray-500 flex items-center gap-2">
