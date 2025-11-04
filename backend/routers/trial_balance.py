@@ -51,6 +51,7 @@ from backend.schemas import (
     TrialBalanceAccountTaskCreate,
     TaskWithRelations,
     TaskSummary,
+    MissingTaskSuggestion,
 )
 from backend.services.trial_balance_linker import auto_link_tasks_to_trial_balance_accounts
 from backend.services.netsuite_parser import parse_netsuite_trial_balance
@@ -1268,3 +1269,80 @@ async def get_account_attachment(
     db.refresh(attachment)
 
     return attachment
+
+
+@router.get("/{trial_balance_id}/missing-tasks", response_model=List[MissingTaskSuggestion])
+async def get_missing_task_suggestions(
+    trial_balance_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """
+    Suggest missing tasks based on templates with default_account_numbers.
+    Finds templates that have accounts in this trial balance but no corresponding task in this period.
+    """
+    from backend.models import trial_balance_account_tasks
+    
+    # Get trial balance with period info
+    trial_balance = db.query(TrialBalanceModel).filter(
+        TrialBalanceModel.id == trial_balance_id
+    ).first()
+    
+    if not trial_balance:
+        raise HTTPException(status_code=404, detail="Trial balance not found")
+    
+    period_id = trial_balance.period_id
+    
+    # Get all accounts in this trial balance
+    accounts = db.query(TrialBalanceAccountModel).filter(
+        TrialBalanceAccountModel.trial_balance_id == trial_balance_id
+    ).all()
+    
+    account_map = {acc.account_number: acc for acc in accounts}
+    
+    # Get all active templates
+    templates = db.query(TaskTemplateModel).filter(
+        TaskTemplateModel.is_active == True,
+        TaskTemplateModel.default_account_numbers.isnot(None)
+    ).all()
+    
+    suggestions = []
+    
+    for template in templates:
+        if not template.default_account_numbers:
+            continue
+        
+        # For each account number in template's default list
+        for account_number in template.default_account_numbers:
+            account_number_clean = str(account_number).strip()
+            
+            # Check if this account exists in trial balance
+            if account_number_clean not in account_map:
+                continue
+            
+            account = account_map[account_number_clean]
+            
+            # Check if a task already exists for this template + account in this period
+            existing_task = db.query(TaskModel).join(
+                trial_balance_account_tasks,
+                TaskModel.id == trial_balance_account_tasks.c.task_id
+            ).filter(
+                TaskModel.period_id == period_id,
+                TaskModel.template_id == template.id,
+                trial_balance_account_tasks.c.account_id == account.id
+            ).first()
+            
+            if not existing_task:
+                # This is a missing task - template exists, account exists, but no task
+                suggestions.append(MissingTaskSuggestion(
+                    template_id=template.id,
+                    template_name=template.name,
+                    account_id=account.id,
+                    account_number=account.account_number,
+                    account_name=account.account_name,
+                    department=template.department,
+                    estimated_hours=template.estimated_hours,
+                    default_owner_id=template.default_owner_id
+                ))
+    
+    return suggestions

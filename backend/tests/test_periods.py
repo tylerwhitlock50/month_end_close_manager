@@ -13,10 +13,11 @@ Endpoint Testing:
 """
 
 import pytest
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from backend.models import Period as PeriodModel, Task as TaskModel
+from backend.models import Period as PeriodModel, Task as TaskModel, TaskStatus
 
 
 class TestGetPeriods:
@@ -129,6 +130,38 @@ class TestGetPeriodDetail:
         assert "period_files_count" in data
         assert "task_files_count" in data
         assert "trial_balance_files_count" in data
+
+
+class TestGetPeriodSummary:
+    """Test suite for GET /api/periods/{period_id}/summary"""
+
+    def test_get_period_summary_success(
+        self,
+        client: TestClient,
+        db_session: Session,
+        sample_period: PeriodModel,
+        sample_task: TaskModel,
+    ):
+        # Mark task as completed to exercise stats
+        sample_task.status = TaskStatus.COMPLETE
+        sample_task.due_date = datetime.now(timezone.utc) - timedelta(days=1)
+        db_session.commit()
+
+        response = client.get(f"/api/periods/{sample_period.id}/summary")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["period_id"] == sample_period.id
+        assert data["period_name"] == sample_period.name
+        assert data["status"] == sample_period.status.value
+        assert "completion_percentage" in data
+        assert data["total_tasks"] >= 1
+        assert data["completed_tasks"] >= 1
+        assert data["overdue_tasks"] >= 0
+
+    def test_get_period_summary_not_found(self, client: TestClient):
+        response = client.get("/api/periods/99999/summary")
+        assert response.status_code == 404
 
 
 class TestCreatePeriod:

@@ -250,3 +250,133 @@ async def export_tasks_pdf(
         }
     )
 
+
+@router.get("/workload")
+async def get_workload_report(
+    period_id: int = None,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Get workload report by user."""
+    # Get all users who have tasks
+    query = db.query(TaskModel)
+    if period_id:
+        query = query.filter(TaskModel.period_id == period_id)
+    
+    tasks = query.all()
+    
+    # Group tasks by assignee
+    workload_map = {}
+    
+    for task in tasks:
+        if not task.assignee:
+            continue
+        
+        assignee_id = task.assignee.id
+        assignee_name = task.assignee.name
+        
+        if assignee_id not in workload_map:
+            workload_map[assignee_id] = {
+                "user_id": assignee_id,
+                "user_name": assignee_name,
+                "assigned_tasks": 0,
+                "completed_tasks": 0,
+                "in_progress_tasks": 0,
+                "estimated_hours": 0.0,
+                "actual_hours": 0.0,
+            }
+        
+        workload_map[assignee_id]["assigned_tasks"] += 1
+        
+        if task.status == TaskStatus.COMPLETE:
+            workload_map[assignee_id]["completed_tasks"] += 1
+        elif task.status == TaskStatus.IN_PROGRESS:
+            workload_map[assignee_id]["in_progress_tasks"] += 1
+        
+        if task.estimated_hours:
+            workload_map[assignee_id]["estimated_hours"] += task.estimated_hours
+        
+        if task.actual_hours:
+            workload_map[assignee_id]["actual_hours"] += task.actual_hours
+    
+    # Calculate completion rates
+    result = []
+    for data in workload_map.values():
+        completion_rate = (
+            (data["completed_tasks"] / data["assigned_tasks"] * 100)
+            if data["assigned_tasks"] > 0
+            else 0
+        )
+        data["completion_rate"] = round(completion_rate, 2)
+        result.append(data)
+    
+    # Sort by assigned tasks descending
+    result.sort(key=lambda x: x["assigned_tasks"], reverse=True)
+    
+    return result
+
+
+@router.get("/distribution")
+async def get_distribution_report(
+    period_id: int = None,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Get task distribution by department."""
+    query = db.query(TaskModel)
+    if period_id:
+        query = query.filter(TaskModel.period_id == period_id)
+    
+    tasks = query.all()
+    
+    # Group tasks by department
+    dept_map = {}
+    
+    for task in tasks:
+        dept = task.department or "Unassigned"
+        
+        if dept not in dept_map:
+            dept_map[dept] = {
+                "department": dept,
+                "total_tasks": 0,
+                "completed_tasks": 0,
+                "overdue_tasks": 0,
+                "completion_days": [],
+            }
+        
+        dept_map[dept]["total_tasks"] += 1
+        
+        if task.status == TaskStatus.COMPLETE:
+            dept_map[dept]["completed_tasks"] += 1
+            
+            # Calculate completion time if available
+            if task.started_at and task.completed_at:
+                days = (task.completed_at - task.started_at).days
+                dept_map[dept]["completion_days"].append(days)
+        
+        # Check if overdue
+        if task.due_date and task.status != TaskStatus.COMPLETE:
+            if task.due_date < datetime.now():
+                dept_map[dept]["overdue_tasks"] += 1
+    
+    # Calculate averages
+    result = []
+    for data in dept_map.values():
+        avg_completion_days = (
+            sum(data["completion_days"]) / len(data["completion_days"])
+            if data["completion_days"]
+            else None
+        )
+        
+        result.append({
+            "department": data["department"],
+            "total_tasks": data["total_tasks"],
+            "completed_tasks": data["completed_tasks"],
+            "overdue_tasks": data["overdue_tasks"],
+            "avg_completion_days": round(avg_completion_days, 2) if avg_completion_days else None,
+        })
+    
+    # Sort by total tasks descending
+    result.sort(key=lambda x: x["total_tasks"], reverse=True)
+    
+    return result

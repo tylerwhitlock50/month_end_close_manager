@@ -11,6 +11,9 @@ import {
   GitMerge,
   ArrowRight,
   Calendar,
+  Maximize2,
+  Minimize2,
+  Edit3,
 } from 'lucide-react'
 import api from '../lib/api'
 import { formatDate } from '../lib/utils'
@@ -41,6 +44,11 @@ type TaskDependencySummary = {
 export default function Tasks() {
   const queryClient = useQueryClient()
   const [viewMode, setViewMode] = useState<'board' | 'list'>('board')
+  const [viewDensity, setViewDensity] = useState<'comfortable' | 'compact'>(() => {
+    const saved = localStorage.getItem('task-view-density')
+    return (saved === 'compact' ? 'compact' : 'comfortable') as 'comfortable' | 'compact'
+  })
+  const [quickEditMode, setQuickEditMode] = useState(false)
   const [showTaskModal, setShowTaskModal] = useState(false)
   const [selectedDepartment, setSelectedDepartment] = useState<string>('')
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null)
@@ -54,11 +62,26 @@ export default function Tasks() {
   const previousStatusRef = useRef<string>('')
   const highlightTaskId = searchParams.get('highlight')
 
+  const toggleViewDensity = () => {
+    setViewDensity((prev) => {
+      const next = prev === 'comfortable' ? 'compact' : 'comfortable'
+      localStorage.setItem('task-view-density', next)
+      return next
+    })
+  }
+
   useEffect(() => {
     setMyTasksOnly(searchParams.get('mine') === '1')
     setReviewQueueOnly(searchParams.get('review') === '1')
     setStatusFilter(searchParams.get('status') ?? '')
   }, [searchParams])
+
+  useEffect(() => {
+    if (!highlightTaskId) {
+      return
+    }
+    setActiveTaskId(Number(highlightTaskId))
+  }, [highlightTaskId])
 
   const handleToggleMyTasks = () => {
     setSelectedTaskIds([])
@@ -293,29 +316,55 @@ export default function Tasks() {
           </div>
 
           {/* View toggle */}
-          <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={() => setViewMode('board')}
+                className={`p-2 rounded ${
+                  viewMode === 'board'
+                    ? 'bg-white text-primary-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+                title="Board View"
+              >
+                <LayoutGrid className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setViewMode('list')}
+                className={`p-2 rounded ${
+                  viewMode === 'list'
+                    ? 'bg-white text-primary-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+                title="List View"
+              >
+                <List className="w-5 h-5" />
+              </button>
+            </div>
             <button
-              onClick={() => setViewMode('board')}
-              className={`p-2 rounded ${
-                viewMode === 'board'
-                  ? 'bg-white text-primary-600 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-              title="Board View"
+              onClick={toggleViewDensity}
+              className="p-2 rounded-lg bg-gray-100 text-gray-600 hover:text-gray-900 hover:bg-gray-200 transition-colors"
+              title={viewDensity === 'comfortable' ? 'Compact View' : 'Comfortable View'}
             >
-              <LayoutGrid className="w-5 h-5" />
+              {viewDensity === 'comfortable' ? (
+                <Minimize2 className="w-5 h-5" />
+              ) : (
+                <Maximize2 className="w-5 h-5" />
+              )}
             </button>
-            <button
-              onClick={() => setViewMode('list')}
-              className={`p-2 rounded ${
-                viewMode === 'list'
-                  ? 'bg-white text-primary-600 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-              title="List View"
-            >
-              <List className="w-5 h-5" />
-            </button>
+            {viewMode === 'list' && (
+              <button
+                onClick={() => setQuickEditMode(!quickEditMode)}
+                className={`p-2 rounded-lg transition-colors ${
+                  quickEditMode
+                    ? 'bg-primary-100 text-primary-700'
+                    : 'bg-gray-100 text-gray-600 hover:text-gray-900 hover:bg-gray-200'
+                }`}
+                title={quickEditMode ? 'Exit Quick Edit' : 'Quick Edit Mode'}
+              >
+                <Edit3 className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -422,6 +471,7 @@ export default function Tasks() {
         <TaskBoard
           tasks={tasks || []}
           onSelectTask={(task) => setActiveTaskId(task.id)}
+          compact={viewDensity === 'compact'}
         />
       ) : (
         <TaskList
@@ -429,6 +479,8 @@ export default function Tasks() {
           onSelectTask={(task) => setActiveTaskId(task.id)}
           selectedTaskIds={selectedTaskIds}
           onSelectionChange={setSelectedTaskIds}
+          compact={viewDensity === 'compact'}
+          quickEditMode={quickEditMode}
         />
       )}
 

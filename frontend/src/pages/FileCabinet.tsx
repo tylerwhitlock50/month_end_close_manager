@@ -87,7 +87,7 @@ export default function FileCabinet() {
   const [priorError, setPriorError] = useState<string | null>(null)
   const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
-    new Set(['period', 'tasks', 'trial-balance'])
+    new Set()  // Start with all sections collapsed
   )
   const [downloadingZip, setDownloadingZip] = useState(false)
   const [previewConfig, setPreviewConfig] = useState<{
@@ -111,17 +111,17 @@ export default function FileCabinet() {
     }
   }, [selectedPeriod])
 
-  // Auto-expand task folders when data loads
-  useEffect(() => {
-    if (cabinetData) {
-      const taskFolders = cabinetData.task_files.map((task) => `task-${task.id}`)
-      setExpandedSections((prev) => {
-        const newSet = new Set(prev)
-        taskFolders.forEach((folder) => newSet.add(folder))
-        return newSet
-      })
-    }
-  }, [cabinetData])
+  // Don't auto-expand task folders - let users expand what they need
+  // useEffect(() => {
+  //   if (cabinetData) {
+  //     const taskFolders = cabinetData.task_files.map((task) => `task-${task.id}`)
+  //     setExpandedSections((prev) => {
+  //       const newSet = new Set(prev)
+  //       taskFolders.forEach((folder) => newSet.add(folder))
+  //       return newSet
+  //     })
+  //   }
+  // }, [cabinetData])
 
   const loadPeriods = async () => {
     try {

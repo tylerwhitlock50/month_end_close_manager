@@ -21,6 +21,7 @@ import { formatDate, getStatusColor, getStatusLabel } from '../lib/utils'
 interface TaskBoardProps {
   tasks: any[]
   onSelectTask?: (task: any) => void
+  compact?: boolean
 }
 
 const BOARD_STATUSES = [
@@ -49,6 +50,7 @@ interface TaskCardProps {
   onStatusChange: (taskId: number, status: string) => void
   isMutating: boolean
   isCurrentTaskMutating: boolean
+  compact?: boolean
 }
 
 interface StatusColumnProps {
@@ -66,6 +68,7 @@ function TaskCard({
   onStatusChange,
   isMutating,
   isCurrentTaskMutating,
+  compact = false,
 }: TaskCardProps) {
   const dependencyDetails = (task.dependency_details ?? []) as Array<{
     id: number
@@ -114,7 +117,8 @@ function TaskCard({
     <div
       ref={dragRef}
       className={clsx(
-        'card cursor-grab active:cursor-grabbing p-3 sm:p-3 transition-shadow border border-transparent',
+        'card cursor-grab active:cursor-grabbing transition-shadow border border-transparent',
+        compact ? 'p-2' : 'p-3 sm:p-3',
         'hover:shadow-md focus-within:shadow-md',
         isBlocked && 'border-red-200 shadow-sm bg-red-50/50',
         isDragging && 'opacity-60'
@@ -123,26 +127,28 @@ function TaskCard({
       onClick={() => onSelectTask?.(task)}
     >
       <div className="flex items-start gap-2">
-        <GripVertical className="mt-1 h-4 w-4 text-gray-300" />
+        {!compact && <GripVertical className="mt-1 h-4 w-4 text-gray-300" />}
         <div className="flex-1">
           <div className="flex items-start justify-between gap-2">
-            <h4 className="text-sm font-semibold text-gray-900 line-clamp-2">
+            <h4 className={clsx('font-semibold text-gray-900 line-clamp-2', compact ? 'text-xs' : 'text-sm')}>
               {task.name}
             </h4>
-            <button
-              type="button"
-              onClick={handleExpandToggle}
-              className="text-gray-400 hover:text-gray-600"
-              aria-label={isExpanded ? 'Collapse task details' : 'Expand task details'}
-            >
-              <ChevronDown
-                className={clsx('h-4 w-4 transition-transform', isExpanded && 'rotate-180')}
-              />
-            </button>
+            {!compact && (
+              <button
+                type="button"
+                onClick={handleExpandToggle}
+                className="text-gray-400 hover:text-gray-600"
+                aria-label={isExpanded ? 'Collapse task details' : 'Expand task details'}
+              >
+                <ChevronDown
+                  className={clsx('h-4 w-4 transition-transform', isExpanded && 'rotate-180')}
+                />
+              </button>
+            )}
           </div>
 
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600">
-            {task.owner && (
+          <div className={clsx('flex flex-wrap items-center gap-x-3 gap-y-1 text-gray-600', compact ? 'mt-1 text-[10px]' : 'mt-2 text-xs')}>
+            {task.owner && !compact && (
               <span className="inline-flex items-center gap-1">
                 <User className="h-3.5 w-3.5" />
                 {task.owner.name}
@@ -150,24 +156,27 @@ function TaskCard({
             )}
             {task.due_date && (
               <span className="inline-flex items-center gap-1">
-                <Calendar className="h-3.5 w-3.5" />
+                <Calendar className={compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} />
                 {formatDate(task.due_date)}
               </span>
             )}
-            {task.file_count > 0 && (
+            {task.file_count > 0 && !compact && (
               <span className="inline-flex items-center gap-1">
                 <Paperclip className="h-3.5 w-3.5" />
                 {task.file_count}
               </span>
             )}
-            {task.department && (
+            {task.department && !compact && (
               <span className="badge badge-gray text-[10px] uppercase tracking-wide">
                 {task.department}
               </span>
             )}
+            <span className={clsx('badge text-[10px] font-medium', `badge-${getStatusColor(task.status)}`)}>
+              {getStatusLabel(task.status)}
+            </span>
           </div>
 
-          {(dependencyDetails.length > 0 || dependentDetails.length > 0) && (
+          {!compact && (dependencyDetails.length > 0 || dependentDetails.length > 0) && (
             <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
               {dependencyDetails.length > 0 && (
                 <span
@@ -201,7 +210,7 @@ function TaskCard({
         </div>
       </div>
 
-      {isExpanded && (
+      {isExpanded && !compact && (
         <div className="mt-3 space-y-3 text-xs text-gray-600">
           {task.description && <p className="leading-relaxed">{task.description}</p>}
 
@@ -283,7 +292,7 @@ function StatusColumn({ statusId, children, onDropTask }: StatusColumnProps) {
   )
 }
 
-export default function TaskBoard({ tasks = [], onSelectTask }: TaskBoardProps) {
+export default function TaskBoard({ tasks = [], onSelectTask, compact = false }: TaskBoardProps) {
   const queryClient = useQueryClient()
   const [updatingTaskId, setUpdatingTaskId] = useState<number | null>(null)
   const [expandedTasks, setExpandedTasks] = useState<number[]>([])
@@ -349,6 +358,7 @@ export default function TaskBoard({ tasks = [], onSelectTask }: TaskBoardProps) 
                       onStatusChange={handleStatusChange}
                       isMutating={updateTaskMutation.isPending}
                       isCurrentTaskMutating={updateTaskMutation.isPending && updatingTaskId === task.id}
+                      compact={compact}
                     />
                   ))
                 )}

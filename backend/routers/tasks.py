@@ -2,7 +2,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta, timezone, date
 import calendar
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
@@ -27,6 +27,8 @@ from backend.schemas import (
     TaskWithRelations,
     TaskBulkUpdateRequest,
     TaskBulkUpdateResult,
+    TaskBulkDeleteRequest,
+    TaskBulkDeleteResult,
     AuditLogWithUser,
     TaskActivityEvent,
     TaskActivityFeed,
@@ -772,13 +774,38 @@ async def update_task(
     return task
 
 
+@router.post("/bulk-delete", response_model=TaskBulkDeleteResult)
+async def bulk_delete_tasks(
+    payload: TaskBulkDeleteRequest,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Bulk delete tasks."""
+    if not payload.task_ids:
+        raise HTTPException(status_code=400, detail="Provide one or more task ids")
+    
+    tasks = db.query(TaskModel).filter(TaskModel.id.in_(payload.task_ids)).all()
+    if not tasks:
+        return TaskBulkDeleteResult(deleted=0)
+    
+    deleted_count = 0
+    for task in tasks:
+        # Log deletion
+        log_task_change(db, task, current_user, "deleted")
+        db.delete(task)
+        deleted_count += 1
+    
+    db.commit()
+    return TaskBulkDeleteResult(deleted=deleted_count)
+
+
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_task(
     task_id: int,
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Delete a task."""
+    """Delete a single task."""
     task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -786,9 +813,11 @@ async def delete_task(
     # Log deletion
     log_task_change(db, task, current_user, "deleted")
     
+    # Delete the task
     db.delete(task)
     db.commit()
-    return None
+    
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # Workflow Builder Endpoints

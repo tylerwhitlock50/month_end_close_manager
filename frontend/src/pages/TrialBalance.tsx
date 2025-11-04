@@ -13,11 +13,14 @@ import {
   SlidersHorizontal,
   BookmarkPlus,
   Trash2,
+  Plus,
 } from 'lucide-react'
 import api from '../lib/api'
 import { usePeriodStore } from '../stores/periodStore'
 import { formatDate } from '../lib/utils'
 import TrialBalanceAccountModal from '../components/TrialBalanceAccountModal'
+import QuickTaskModal from '../components/QuickTaskModal'
+import GenerateMissingTasksModal from '../components/GenerateMissingTasksModal'
 
 interface Period {
   id: number
@@ -166,6 +169,8 @@ export default function TrialBalance() {
   const [savedFilters, setSavedFilters] = useState<SavedFilterMap>({})
   const [newFilterName, setNewFilterName] = useState('')
   const [activeSavedFilter, setActiveSavedFilter] = useState<string | null>(null)
+  const [quickTaskAccount, setQuickTaskAccount] = useState<{ id: number; number: string; name: string } | null>(null)
+  const [showGenerateMissingTasks, setShowGenerateMissingTasks] = useState(false)
 
   useEffect(() => {
     try {
@@ -505,6 +510,10 @@ export default function TrialBalance() {
       newAccounts,
       priorOnlyAccounts,
       accountsWithoutTasks,
+      accountsWithoutTasksList: accountsWithoutTasks.map((row) => ({
+        accountNumber: row.accountNumber,
+        accountName: row.current?.account_name || row.accountNumber,
+      })),
       pendingVerification,
     }
   }, [tableRows])
@@ -729,9 +738,21 @@ export default function TrialBalance() {
         )}
 
         {(importSummary || whatsNewMetrics.newAccounts.length > 0 || whatsNewMetrics.accountsWithoutTasks.length > 0 || whatsNewMetrics.pendingVerification.length > 0) && (
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 space-y-2">
-            <div className="flex items-center gap-2 font-semibold">
-              <Sparkles className="h-4 w-4" /> What's New This Period
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 font-semibold">
+                <Sparkles className="h-4 w-4" /> What's New This Period
+              </div>
+              {whatsNewMetrics.accountsWithoutTasks.length > 0 && (
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-md transition-colors"
+                  onClick={() => setShowGenerateMissingTasks(true)}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Generate Missing Tasks
+                </button>
+              )}
             </div>
             <ul className="space-y-1">
               <li>
@@ -978,8 +999,8 @@ export default function TrialBalance() {
                       <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Δ vs Prior
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Linked Tasks
+                      <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Linked
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Status
@@ -1046,10 +1067,33 @@ export default function TrialBalance() {
                             {delta === null ? '—' : formatCurrency(delta)}
                             {deltaPercent === null ? '' : ` (${deltaPercent.toFixed(1)}%)`}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                            {currentAccount && currentAccount.tasks.length > 0
-                              ? currentAccount.tasks.map((task) => task.name).join(', ')
-                              : '—'}
+                          <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
+                            {currentAccount && currentAccount.tasks.length > 0 ? (
+                              <div className="relative inline-flex">
+                                <span
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-green-100 text-green-700"
+                                  title={`${currentAccount.tasks.length} linked task${currentAccount.tasks.length === 1 ? '' : 's'}`}
+                                >
+                                  ✓
+                                </span>
+                                <div className="peer h-6 w-6" />
+                                <div className="pointer-events-none absolute left-1/2 top-full z-10 mt-2 hidden w-48 -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-3 text-left text-xs text-gray-600 shadow-lg peer-hover:block">
+                                  <p className="font-medium text-gray-800 mb-1">Linked tasks</p>
+                                  <ul className="space-y-1">
+                                    {currentAccount.tasks.slice(0, 4).map((task) => (
+                                      <li key={task.id} className="truncate">{task.name}</li>
+                                    ))}
+                                    {currentAccount.tasks.length > 4 && (
+                                      <li className="text-gray-400">+ {currentAccount.tasks.length - 4} more</li>
+                                    )}
+                                  </ul>
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-gray-400" title="No linked tasks">
+                                —
+                              </span>
+                            )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
                             {currentAccount ? (
@@ -1064,12 +1108,29 @@ export default function TrialBalance() {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
                             {currentAccount ? (
-                              <button
-                                className="btn-secondary text-xs"
-                                onClick={() => setActiveAccountId(currentAccount.id)}
-                              >
-                                Manage
-                              </button>
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded hover:bg-primary-100 transition-colors"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                  setQuickTaskAccount({
+                    id: currentAccount.id,
+                    number: accountNumber,
+                    name: accountName,
+                  })
+                                  }}
+                                  title="Quick create task"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  Task
+                                </button>
+                                <button
+                                  className="btn-secondary text-xs"
+                                  onClick={() => setActiveAccountId(currentAccount.id)}
+                                >
+                                  Manage
+                                </button>
+                              </div>
                             ) : (
                               <span className="text-xs text-gray-400">—</span>
                             )}
@@ -1102,6 +1163,26 @@ export default function TrialBalance() {
           account={activeAccount}
           onClose={() => setActiveAccountId(null)}
           onRefetch={() => trialBalanceQuery.refetch()}
+        />
+      )}
+
+      {quickTaskAccount && selectedPeriodId && (
+        <QuickTaskModal
+          onClose={() => setQuickTaskAccount(null)}
+          onSuccess={() => trialBalanceQuery.refetch()}
+          periodId={Number(selectedPeriodId)}
+          accountId={quickTaskAccount.id}
+          accountNumber={quickTaskAccount.number}
+          accountName={quickTaskAccount.name}
+        />
+      )}
+
+      {showGenerateMissingTasks && selectedPeriodId && trialBalanceQuery.data && (
+        <GenerateMissingTasksModal
+          onClose={() => setShowGenerateMissingTasks(false)}
+          onSuccess={() => trialBalanceQuery.refetch()}
+          periodId={Number(selectedPeriodId)}
+          trialBalanceId={trialBalanceQuery.data.id}
         />
       )}
     </div>

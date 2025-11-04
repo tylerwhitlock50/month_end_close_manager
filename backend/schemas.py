@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from decimal import Decimal
 from datetime import datetime, date
 from backend.models import UserRole, TaskStatus, PeriodStatus, ApprovalStatus, CloseType
@@ -343,6 +343,26 @@ class TaskBulkUpdateResult(BaseModel):
     updated: int
 
 
+class TaskBulkDeleteRequest(BaseModel):
+    task_ids: List[int]
+
+
+class TaskBulkDeleteResult(BaseModel):
+    deleted: int
+
+
+class MissingTaskSuggestion(BaseModel):
+    """Suggestion for a missing task based on template and account."""
+    template_id: int
+    template_name: str
+    account_id: int
+    account_number: str
+    account_name: str
+    department: Optional[str] = None
+    estimated_hours: Optional[float] = None
+    default_owner_id: Optional[int] = None
+
+
 # Notification Schemas
 class Notification(BaseModel):
     id: int
@@ -413,6 +433,18 @@ class PeriodDetail(BaseModel):
     period_files_count: int
     task_files_count: int
     trial_balance_files_count: int
+
+
+class PeriodSummary(BaseModel):
+    period_id: int
+    period_name: str
+    status: PeriodStatus
+    target_close_date: Optional[date] = None
+    days_until_close: Optional[int] = None
+    completion_percentage: float
+    total_tasks: int
+    completed_tasks: int
+    overdue_tasks: int
 
 
 # Review Queue Schemas
@@ -737,3 +769,18 @@ class WorkflowResponse(BaseModel):
     """Schema for workflow data with nodes and computed edges"""
     nodes: List[WorkflowNode]
     edges: List[WorkflowEdge]
+
+
+class SearchResultItem(BaseModel):
+    id: Optional[int] = None
+    title: str
+    subtitle: Optional[str] = None
+    url: str
+    type: Literal['task', 'template', 'account', 'page']
+
+
+class SearchResults(BaseModel):
+    tasks: List[SearchResultItem] = []
+    templates: List[SearchResultItem] = []
+    accounts: List[SearchResultItem] = []
+    pages: List[SearchResultItem] = []

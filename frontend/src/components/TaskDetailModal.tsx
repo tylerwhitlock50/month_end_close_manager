@@ -380,6 +380,17 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
     },
   })
 
+  const deleteTaskMutation = useMutation({
+    mutationFn: async () => {
+      await api.delete(`/api/tasks/${taskId}`)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      onUpdated()
+      onClose()
+    },
+  })
+
   const handleRequestApproval = () => {
     if (!selectedReviewerId) return
     createApprovalMutation.mutate(selectedReviewerId as number)
@@ -891,10 +902,14 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
             </section>
 
             <div className="flex items-center justify-between border-t border-gray-200 pt-4">
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <CheckCircle2 className="w-4 h-4" />
-                Update the task to notify reviewers when you are ready for approval.
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete Task
+              </button>
               <div className="flex items-center gap-3">
                 <button type="button" onClick={onClose} className="btn-secondary">
                   Close
@@ -934,6 +949,53 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
           externalUrl={previewFile.external_url}
           onClose={() => setPreviewFile(null)}
         />
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]" onClick={() => setShowDeleteConfirm(false)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3 mb-4">
+              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                <Trash2 className="w-5 h-5 text-red-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-gray-900 mb-1">Delete Task?</h3>
+                <p className="text-sm text-gray-600">
+                  Are you sure you want to delete "{data?.name}"? This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                className="btn-secondary"
+                disabled={deleteTaskMutation.isPending}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteTaskMutation.mutate()}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors disabled:opacity-50"
+                disabled={deleteTaskMutation.isPending}
+              >
+                {deleteTaskMutation.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    Delete Task
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Approval Request Modal */}

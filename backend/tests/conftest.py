@@ -37,7 +37,8 @@ from backend.routers import (
     reports,
     trial_balance,
     task_templates,
-    notifications
+    notifications,
+    search,
 )
 
 
@@ -144,6 +145,7 @@ def client():
     app.include_router(trial_balance.router)
     app.include_router(task_templates.router)
     app.include_router(notifications.router)
+    app.include_router(search.router)
 
     def override_get_db():
         db = TestingSessionLocal()

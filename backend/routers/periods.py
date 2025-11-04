@@ -27,6 +27,7 @@ from backend.schemas import (
     PeriodProgress,
     DashboardStats,
     PeriodDetail,
+    PeriodSummary,
     TaskSummary,
     DepartmentSummary,
 )
@@ -79,6 +80,59 @@ async def get_period(
     if not period:
         raise HTTPException(status_code=404, detail="Period not found")
     return period
+
+
+@router.get("/{period_id}/summary", response_model=PeriodSummary)
+async def get_period_summary(
+    period_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Return lightweight summary data for the active period context bar."""
+
+    period = db.query(PeriodModel).filter(PeriodModel.id == period_id).first()
+    if not period:
+        raise HTTPException(status_code=404, detail="Period not found")
+
+    tasks = db.query(TaskModel).filter(TaskModel.period_id == period_id).all()
+
+    total_tasks = len(tasks)
+    completed_tasks = sum(1 for task in tasks if task.status == TaskStatus.COMPLETE)
+
+    def ensure_aware(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    now = datetime.now(timezone.utc)
+    overdue_tasks = sum(
+        1
+        for task in tasks
+        if task.status != TaskStatus.COMPLETE
+        and (due := ensure_aware(task.due_date))
+        and due < now
+    )
+
+    completion_percentage = (completed_tasks / total_tasks * 100) if total_tasks else 0.0
+
+    days_until_close = None
+    if period.target_close_date:
+        target_dt = datetime.combine(period.target_close_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+        days_until_close = (target_dt - now).days
+
+    return PeriodSummary(
+        period_id=period.id,
+        period_name=period.name,
+        status=period.status,
+        target_close_date=period.target_close_date,
+        days_until_close=days_until_close,
+        completion_percentage=round(completion_percentage, 2),
+        total_tasks=total_tasks,
+        completed_tasks=completed_tasks,
+        overdue_tasks=overdue_tasks,
+    )
 
 
 @router.get("/{period_id}/progress", response_model=PeriodProgress)
