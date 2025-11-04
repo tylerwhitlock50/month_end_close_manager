@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 from typing import Optional, List, Dict, Any
 from decimal import Decimal
 from datetime import datetime, date
@@ -33,8 +33,7 @@ class User(UserBase):
     is_active: bool
     created_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Period Schemas
@@ -65,8 +64,7 @@ class Period(PeriodBase):
     actual_close_date: Optional[date] = None
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Task Template Schemas
@@ -83,7 +81,7 @@ class TaskTemplateBase(BaseModel):
     position_x: Optional[float] = None
     position_y: Optional[float] = None
 
-    @validator('default_account_numbers', pre=True, always=True)
+    @field_validator('default_account_numbers', mode='before')
     def ensure_default_account_numbers(cls, value):
         if value is None:
             return []
@@ -118,8 +116,7 @@ class TaskTemplate(TaskTemplateBase):
     is_active: bool
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Task Schemas
@@ -174,8 +171,7 @@ class Task(TaskBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TaskSummary(BaseModel):
@@ -184,8 +180,7 @@ class TaskSummary(BaseModel):
     status: TaskStatus
     due_date: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TaskWithRelations(Task):
@@ -207,8 +202,7 @@ class CriticalPathItem(BaseModel):
     blocked_dependents: int = 0
     dependents: List[TaskSummary] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # File Schemas
@@ -237,8 +231,7 @@ class File(FileBase):
     uploaded_at: datetime
     last_accessed_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FileWithUser(File):
@@ -268,8 +261,7 @@ class Approval(ApprovalBase):
     requested_at: datetime
     reviewed_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ApprovalWithReviewer(Approval):
@@ -298,8 +290,7 @@ class Comment(CommentBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CommentWithUser(Comment):
@@ -319,8 +310,7 @@ class AuditLog(BaseModel):
     details: Optional[str] = None
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AuditLogWithUser(AuditLog):
@@ -365,8 +355,7 @@ class Notification(BaseModel):
     created_at: datetime
     read_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Authentication Schemas
@@ -439,8 +428,7 @@ class ReviewTask(BaseModel):
     is_overdue: bool = False
     department: Optional[str] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReviewApproval(BaseModel):
@@ -455,8 +443,7 @@ class ReviewApproval(BaseModel):
     file_count: int = 0
     is_overdue: bool = False
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MyReviewsResponse(BaseModel):
@@ -522,8 +509,7 @@ class TrialBalanceAttachment(TrialBalanceAttachmentBase):
     uploaded_at: datetime
     last_accessed_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TrialBalanceAccountBase(BaseModel):
@@ -558,9 +544,10 @@ class TrialBalanceValidation(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
-        json_encoders = {Decimal: lambda v: float(v) if v is not None else None}
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={Decimal: lambda v: float(v) if v is not None else None},
+    )
 
 
 class TrialBalanceAccount(TrialBalanceAccountBase):
@@ -578,9 +565,10 @@ class TrialBalanceAccount(TrialBalanceAccountBase):
     attachments: List[TrialBalanceAttachment] = []
     validations: List[TrialBalanceValidation] = []
 
-    class Config:
-        from_attributes = True
-        json_encoders = {Decimal: lambda v: float(v) if v is not None else None}
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={Decimal: lambda v: float(v) if v is not None else None},
+    )
 
 
 class TrialBalance(BaseModel):
@@ -595,9 +583,10 @@ class TrialBalance(BaseModel):
     uploaded_at: datetime
     accounts: List[TrialBalanceAccount] = []
 
-    class Config:
-        from_attributes = True
-        json_encoders = {Decimal: lambda v: float(v) if v is not None else None}
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={Decimal: lambda v: float(v) if v is not None else None},
+    )
 
 
 class TrialBalanceSummary(BaseModel):
@@ -679,8 +668,7 @@ class TaskWithFiles(BaseModel):
     status: TaskStatus
     files: List[FileWithUser] = []
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TrialBalanceFileInfo(BaseModel):
@@ -697,8 +685,7 @@ class TrialBalanceFileInfo(BaseModel):
     uploaded_at: datetime
     file_path: str
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FileCabinetStructure(BaseModel):
@@ -720,8 +707,7 @@ class SimpleUser(BaseModel):
     id: int
     name: str
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WorkflowNode(BaseModel):

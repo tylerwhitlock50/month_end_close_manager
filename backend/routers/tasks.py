@@ -563,7 +563,7 @@ async def create_task(
         raise HTTPException(status_code=404, detail="Period not found")
     
     # Create task
-    task_dict = task_data.dict(exclude={"dependency_ids"})
+    task_dict = task_data.model_dump(exclude={"dependency_ids"})
 
     if not task_dict.get("due_date"):
         offset_days = 0
@@ -696,7 +696,7 @@ async def update_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    update_data = task_update.dict(exclude_unset=True, exclude={"dependency_ids"})
+    update_data = task_update.model_dump(exclude_unset=True, exclude={"dependency_ids"})
     previous_assignee = task.assignee_id
     
     # Track status changes
@@ -929,4 +929,3 @@ async def update_task_dependencies(
     
     db.commit()
     return {"success": True, "message": "Dependencies updated", "dependency_ids": dependency_ids}
-

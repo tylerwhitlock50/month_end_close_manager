@@ -83,7 +83,7 @@ async def create_approval(
         raise HTTPException(status_code=404, detail="Reviewer not found")
     
     # Create approval
-    db_approval = ApprovalModel(**approval_data.dict())
+    db_approval = ApprovalModel(**approval_data.model_dump())
     db.add(db_approval)
     db.commit()
     db.refresh(db_approval)

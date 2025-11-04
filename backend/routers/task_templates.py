@@ -41,7 +41,7 @@ async def create_task_template(
     current_user: UserModel = Depends(require_role([UserRole.ADMIN, UserRole.REVIEWER]))
 ):
     """Create a new task template."""
-    template_dict = payload.dict(exclude={"dependency_ids"})
+    template_dict = payload.model_dump(exclude={"dependency_ids"})
     template = TaskTemplateModel(**template_dict)
     db.add(template)
     db.flush()
@@ -146,7 +146,7 @@ async def update_task_template(
     if not template:
         raise HTTPException(status_code=404, detail="Task template not found")
 
-    update_data = payload.dict(exclude_unset=True)
+    update_data = payload.model_dump(exclude_unset=True)
     dependency_ids = update_data.pop("dependency_ids", None)
     
     for field, value in update_data.items():

@@ -245,7 +245,7 @@ async def create_period(
         )
     
     # Create period
-    db_period = PeriodModel(**period_data.dict())
+    db_period = PeriodModel(**period_data.model_dump())
     db.add(db_period)
     db.commit()
     db.refresh(db_period)
@@ -305,7 +305,7 @@ async def update_period(
     if not period:
         raise HTTPException(status_code=404, detail="Period not found")
     
-    update_data = period_update.dict(exclude_unset=True)
+    update_data = period_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(period, field, value)
     
