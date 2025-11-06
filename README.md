@@ -79,6 +79,39 @@ docker-compose exec backend python init_db.py --seed
 - Email: `admin@monthend.com`
 - Password: `admin123`
 
+### Custom Port Configuration
+
+If you need to use different ports (e.g., if default ports are already in use):
+
+1. **Edit docker-compose.yml** to change port mappings:
+```yaml
+services:
+  db:
+    ports:
+      - "5433:5432"  # Maps host port 5433 to container port 5432
+
+  backend:
+    ports:
+      - "8001:8000"  # Maps host port 8001 to container port 8000
+    environment:
+      ALLOWED_ORIGINS: http://YOUR_SERVER_IP:5173,http://localhost:5173
+
+  frontend:
+    environment:
+      VITE_API_URL: http://YOUR_SERVER_IP:8001
+```
+
+2. **Update your .env file** if connecting from outside Docker:
+```bash
+DATABASE_URL=postgresql://monthend_user:monthend_password@localhost:5433/monthend_db
+```
+
+3. **Access with custom ports**:
+- Frontend: http://YOUR_SERVER_IP:5173
+- Backend API: http://YOUR_SERVER_IP:8001/docs
+
+**Note**: Replace `YOUR_SERVER_IP` with your actual server IP address (e.g., `10.207.24.120`). The CORS configuration in the backend allows connections from the specified origins.
+
 ### Option 2: Local Development
 
 #### Backend Setup

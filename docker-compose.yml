@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: monthend_password
       POSTGRES_DB: monthend_db
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -45,8 +45,9 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change-this-secret-key-in-production}
       DEBUG: ${DEBUG:-True}
       PYTHONPATH: /app
+      ALLOWED_ORIGINS: http://10.207.24.120:5173,http://localhost:5173,http://127.0.0.1:5173
     ports:
-      - "8000:8000"
+      - "8001:8000"
     volumes:
       - ./backend:/app/backend
       - ./files:/app/files
@@ -64,7 +65,7 @@ services:
       dockerfile: Dockerfile.frontend
     container_name: monthend_frontend
     environment:
-      VITE_API_URL: http://localhost:8000
+      VITE_API_URL: http://10.207.24.120:8001
     ports:
       - "5173:5173"
     volumes:
