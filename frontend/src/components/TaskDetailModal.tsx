@@ -151,6 +151,7 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
   const [commentError, setCommentError] = useState('')
   const [previewFile, setPreviewFile] = useState<TaskFile | null>(null)
   const [showApprovalModal, setShowApprovalModal] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [selectedReviewerId, setSelectedReviewerId] = useState<number | ''>('')
 
   const { data: taskData, isLoading: taskLoading, refetch: refetchTask } = useQuery<TaskResponse>({
@@ -385,6 +386,7 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
       await api.delete(`/api/tasks/${taskId}`)
     },
     onSuccess: () => {
+      setShowDeleteConfirm(false)
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       onUpdated()
       onClose()
