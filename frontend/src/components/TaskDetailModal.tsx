@@ -17,7 +17,7 @@ import {
   UserCheck,
   Trash2,
 } from 'lucide-react'
-import api from '../lib/api'
+import api, { API_URL } from '../lib/api'
 import { formatDate, formatDateTime, getStatusLabel, getStatusColor } from '../lib/utils'
 import FilePreviewModal from './FilePreviewModal'
 import TaskTimeline from './TaskTimeline'
@@ -133,7 +133,7 @@ function formatInputDate(value?: string) {
 }
 
 function buildFileUrl(taskId: number, fileName: string, fileId?: number) {
-  const base = api.defaults.baseURL || import.meta.env.VITE_API_URL || 'http://localhost:8000'
+  const base = api.defaults.baseURL || API_URL
   if (fileId) {
     return `${base.replace(/\/$/, '')}/api/files/download/${fileId}?inline=0`
   }

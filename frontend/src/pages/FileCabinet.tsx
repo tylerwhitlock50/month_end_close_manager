@@ -17,7 +17,13 @@ import {
   Eye,
   History,
 } from 'lucide-react'
-import api, { fetchPeriodFiles, fetchPriorPeriodFiles, downloadPeriodZip, deleteFile } from '../lib/api'
+import api, {
+  API_URL,
+  fetchPeriodFiles,
+  fetchPriorPeriodFiles,
+  downloadPeriodZip,
+  deleteFile,
+} from '../lib/api'
 import FileUploadModal from '../components/FileUploadModal'
 import FilePreviewModal from '../components/FilePreviewModal'
 
@@ -77,7 +83,7 @@ interface FileCabinetData {
 }
 
 export default function FileCabinet() {
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+  const API_BASE = api.defaults.baseURL || API_URL
   const [periods, setPeriods] = useState<Period[]>([])
   const [selectedPeriod, setSelectedPeriod] = useState<number | null>(null)
   const [cabinetData, setCabinetData] = useState<FileCabinetData | null>(null)

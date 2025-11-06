@@ -1,6 +1,22 @@
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+function resolveApiUrl(): string {
+  const envUrl = import.meta.env.VITE_API_URL
+  if (envUrl && envUrl.trim().length > 0) {
+    return envUrl
+  }
+
+  if (typeof window !== 'undefined') {
+    const { protocol, hostname } = window.location
+    const apiPort = import.meta.env.VITE_API_PORT || '8000'
+    const portSegment = apiPort ? `:${apiPort}` : ''
+    return `${protocol}//${hostname}${portSegment}`
+  }
+
+  return 'http://backend:8000'
+}
+
+export const API_URL = resolveApiUrl()
 
 export const api = axios.create({
   baseURL: API_URL,
